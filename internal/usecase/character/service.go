@@ -9,33 +9,59 @@ import (
 	"github.com/google/uuid"
 
 	domain "github.com/yu-be-shi/character-api/internal/domain/character"
+	racedomain "github.com/yu-be-shi/character-api/internal/domain/race"
 )
 
-// Clock は現在時刻を返す関数型。テストで差し替えられる。
 type Clock func() time.Time
 
 type Service struct {
-	repo  domain.Repository
-	clock Clock
+	repo     domain.Repository
+	raceRepo racedomain.Repository
+	clock    Clock
 }
 
-func NewService(repo domain.Repository, clock Clock) *Service {
+func NewService(repo domain.Repository, raceRepo racedomain.Repository, clock Clock) *Service {
 	if clock == nil {
 		clock = time.Now
 	}
-	return &Service{repo: repo, clock: clock}
+	return &Service{repo: repo, raceRepo: raceRepo, clock: clock}
 }
 
 type CreateInput struct {
-	Name       string
-	Attributes domain.Attributes
+	Name        string
+	Description string
+	RaceID      uuid.UUID
+	Gender      domain.Gender
+	BirthDate   *time.Time
+	BirthPlace  string
+	HeightCm    *int16
+	WeightKg    *int16
+	BodyFat     *float32
+	SizeTop     *int16
+	SizeMiddle  *int16
+	SizeBottom  *int16
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Character, error) {
-	c, err := domain.New(in.Name, in.Attributes, s.now())
+	if _, err := s.raceRepo.FindByID(ctx, in.RaceID); err != nil {
+		if errors.Is(err, racedomain.ErrNotFound) {
+			return nil, fmt.Errorf("usecase create character: %w", racedomain.ErrNotFound)
+		}
+		return nil, fmt.Errorf("usecase create character: %w", err)
+	}
+	c, err := domain.New(in.Name, in.Description, in.RaceID, in.Gender, s.now())
 	if err != nil {
 		return nil, err
 	}
+	c.BirthDate = in.BirthDate
+	c.BirthPlace = in.BirthPlace
+	c.HeightCm = in.HeightCm
+	c.WeightKg = in.WeightKg
+	c.BodyFat = in.BodyFat
+	c.SizeTop = in.SizeTop
+	c.SizeMiddle = in.SizeMiddle
+	c.SizeBottom = in.SizeBottom
+
 	if err := s.repo.Save(ctx, c); err != nil {
 		return nil, fmt.Errorf("usecase create character: %w", err)
 	}
@@ -51,23 +77,24 @@ func (s *Service) List(ctx context.Context) ([]*domain.Character, error) {
 }
 
 type UpdateInput struct {
-	Name       *string
-	Attributes *domain.Attributes
+	domain.UpdateFields
 }
 
 func (s *Service) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*domain.Character, error) {
+	if in.RaceID != nil {
+		if _, err := s.raceRepo.FindByID(ctx, *in.RaceID); err != nil {
+			if errors.Is(err, racedomain.ErrNotFound) {
+				return nil, fmt.Errorf("usecase update character: %w", racedomain.ErrNotFound)
+			}
+			return nil, fmt.Errorf("usecase update character: %w", err)
+		}
+	}
 	c, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	now := s.now()
-	if in.Name != nil {
-		if err := c.Rename(*in.Name, now); err != nil {
-			return nil, err
-		}
-	}
-	if in.Attributes != nil {
-		c.ReplaceAttributes(*in.Attributes, now)
+	if err := c.Update(in.UpdateFields, s.now()); err != nil {
+		return nil, err
 	}
 	if err := s.repo.Update(ctx, c); err != nil {
 		return nil, fmt.Errorf("usecase update character: %w", err)
@@ -85,6 +112,4 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (s *Service) now() time.Time {
-	return s.clock().UTC()
-}
+func (s *Service) now() time.Time { return s.clock().UTC() }

@@ -14,7 +14,8 @@ import (
 	"github.com/yu-be-shi/character-api/internal/config"
 	gormrepo "github.com/yu-be-shi/character-api/internal/infrastructure/persistence/gorm"
 	httpiface "github.com/yu-be-shi/character-api/internal/interfaces/http"
-	usecase "github.com/yu-be-shi/character-api/internal/usecase/character"
+	charUsecase "github.com/yu-be-shi/character-api/internal/usecase/character"
+	raceUsecase "github.com/yu-be-shi/character-api/internal/usecase/race"
 )
 
 func main() {
@@ -31,27 +32,18 @@ func run() error {
 	}
 	setupLogger(cfg.LogLevel)
 
-	// "migrate" サブコマンド: マイグレーション実行のみで終了する。
-	// Repo4 の docker-compose で init container として使用する。
-	if len(os.Args) > 1 && os.Args[1] == "migrate" {
-		db, err := gormrepo.Open(cfg.DB)
-		if err != nil {
-			return err
-		}
-		sqlDB, _ := db.DB()
-		defer sqlDB.Close()
-		slog.Info("migrations completed")
-		return nil
-	}
-
 	db, err := gormrepo.Open(cfg.DB)
 	if err != nil {
 		return err
 	}
 
+	raceRepo := gormrepo.NewRaceRepository(db)
 	charRepo := gormrepo.NewCharacterRepository(db)
-	charSvc := usecase.NewService(charRepo, nil)
-	e := httpiface.New(cfg, charSvc)
+
+	raceSvc := raceUsecase.NewService(raceRepo)
+	charSvc := charUsecase.NewService(charRepo, raceRepo, nil)
+
+	e := httpiface.New(cfg, charSvc, raceSvc)
 
 	srvErr := make(chan error, 1)
 	go func() {

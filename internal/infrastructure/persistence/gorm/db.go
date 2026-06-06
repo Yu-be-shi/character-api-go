@@ -30,10 +30,6 @@ func Open(cfg config.DBConfig) (*gorm.DB, error) {
 	sqlDB.SetMaxIdleConns(5)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	if err := runMigrations(db); err != nil {
-		return nil, fmt.Errorf("gormrepo: migrations: %w", err)
-	}
-
 	slog.Info("database connected", "driver", "postgres")
 	return db, nil
 }

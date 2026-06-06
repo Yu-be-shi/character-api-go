@@ -7,7 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	domain "github.com/yu-be-shi/character-api/internal/domain/character"
+	chardomain "github.com/yu-be-shi/character-api/internal/domain/character"
+	racedomain "github.com/yu-be-shi/character-api/internal/domain/race"
 	"github.com/yu-be-shi/character-api/internal/interfaces/http/dto"
 	usecase "github.com/yu-be-shi/character-api/internal/usecase/character"
 )
@@ -31,7 +32,7 @@ func (h *CharacterHandler) Register(g *echo.Group) {
 func (h *CharacterHandler) List(c echo.Context) error {
 	cs, err := h.svc.List(c.Request().Context())
 	if err != nil {
-		return mapErr(err)
+		return mapCharErr(err)
 	}
 	return c.JSON(http.StatusOK, dto.FromDomainList(cs))
 }
@@ -45,11 +46,21 @@ func (h *CharacterHandler) Create(c echo.Context) error {
 		return err
 	}
 	out, err := h.svc.Create(c.Request().Context(), usecase.CreateInput{
-		Name:       req.Name,
-		Attributes: req.Attributes,
+		Name:        req.Name,
+		Description: req.Description,
+		RaceID:      req.RaceID,
+		Gender:      chardomain.Gender(req.Gender),
+		BirthDate:   req.BirthDate,
+		BirthPlace:  req.BirthPlace,
+		HeightCm:    req.HeightCm,
+		WeightKg:    req.WeightKg,
+		BodyFat:     req.BodyFat,
+		SizeTop:     req.SizeTop,
+		SizeMiddle:  req.SizeMiddle,
+		SizeBottom:  req.SizeBottom,
 	})
 	if err != nil {
-		return mapErr(err)
+		return mapCharErr(err)
 	}
 	return c.JSON(http.StatusCreated, dto.FromDomain(out))
 }
@@ -61,7 +72,7 @@ func (h *CharacterHandler) Get(c echo.Context) error {
 	}
 	out, err := h.svc.Get(c.Request().Context(), id)
 	if err != nil {
-		return mapErr(err)
+		return mapCharErr(err)
 	}
 	return c.JSON(http.StatusOK, dto.FromDomain(out))
 }
@@ -78,12 +89,31 @@ func (h *CharacterHandler) Update(c echo.Context) error {
 	if err := c.Validate(&req); err != nil {
 		return err
 	}
+
+	var gender *chardomain.Gender
+	if req.Gender != nil {
+		g := chardomain.Gender(*req.Gender)
+		gender = &g
+	}
+
 	out, err := h.svc.Update(c.Request().Context(), id, usecase.UpdateInput{
-		Name:       req.Name,
-		Attributes: req.Attributes,
+		UpdateFields: chardomain.UpdateFields{
+			Name:        req.Name,
+			Description: req.Description,
+			RaceID:      req.RaceID,
+			Gender:      gender,
+			BirthDate:   req.BirthDate,
+			BirthPlace:  req.BirthPlace,
+			HeightCm:    req.HeightCm,
+			WeightKg:    req.WeightKg,
+			BodyFat:     req.BodyFat,
+			SizeTop:     req.SizeTop,
+			SizeMiddle:  req.SizeMiddle,
+			SizeBottom:  req.SizeBottom,
+		},
 	})
 	if err != nil {
-		return mapErr(err)
+		return mapCharErr(err)
 	}
 	return c.JSON(http.StatusOK, dto.FromDomain(out))
 }
@@ -94,7 +124,7 @@ func (h *CharacterHandler) Delete(c echo.Context) error {
 		return err
 	}
 	if err := h.svc.Delete(c.Request().Context(), id); err != nil {
-		return mapErr(err)
+		return mapCharErr(err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -107,12 +137,15 @@ func parseID(c echo.Context) (uuid.UUID, error) {
 	return id, nil
 }
 
-func mapErr(err error) error {
+func mapCharErr(err error) error {
 	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, chardomain.ErrNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
-	case errors.Is(err, domain.ErrInvalidName):
+	case errors.Is(err, chardomain.ErrInvalidName),
+		errors.Is(err, chardomain.ErrInvalidGender):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	case errors.Is(err, racedomain.ErrNotFound):
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, "race not found")
 	default:
 		return err
 	}

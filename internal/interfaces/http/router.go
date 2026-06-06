@@ -10,7 +10,8 @@ import (
 	"github.com/yu-be-shi/character-api/internal/config"
 	"github.com/yu-be-shi/character-api/internal/interfaces/http/handler"
 	apimw "github.com/yu-be-shi/character-api/internal/interfaces/http/middleware"
-	usecase "github.com/yu-be-shi/character-api/internal/usecase/character"
+	charUsecase "github.com/yu-be-shi/character-api/internal/usecase/character"
+	raceUsecase "github.com/yu-be-shi/character-api/internal/usecase/race"
 )
 
 type echoValidator struct {
@@ -24,7 +25,7 @@ func (ev *echoValidator) Validate(i any) error {
 	return nil
 }
 
-func New(cfg config.Config, charSvc *usecase.Service) *echo.Echo {
+func New(cfg config.Config, charSvc *charUsecase.Service, raceSvc *raceUsecase.Service) *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -39,12 +40,11 @@ func New(cfg config.Config, charSvc *usecase.Service) *echo.Echo {
 		AllowHeaders: []string{echo.HeaderContentType, echo.HeaderAuthorization},
 	}))
 
-	// ヘルスチェックは認証不要（Repo4 の healthcheck が叩く）
 	e.GET("/healthz", handler.Health)
 
-	// /api/v1 配下はすべてサービス間認証を要求
 	api := e.Group("/api/v1", apimw.InternalAPIKey(cfg.InternalAPIKey))
 	handler.NewCharacterHandler(charSvc).Register(api.Group("/characters"))
+	handler.NewRaceHandler(raceSvc).Register(api.Group("/races"))
 
 	return e
 }
