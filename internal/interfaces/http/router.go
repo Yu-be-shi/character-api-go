@@ -6,12 +6,14 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	echoSwagger "github.com/swaggo/echo-swagger"
 
 	"github.com/yu-be-shi/character-api/internal/config"
 	"github.com/yu-be-shi/character-api/internal/interfaces/http/handler"
 	apimw "github.com/yu-be-shi/character-api/internal/interfaces/http/middleware"
 	charUsecase "github.com/yu-be-shi/character-api/internal/usecase/character"
 	raceUsecase "github.com/yu-be-shi/character-api/internal/usecase/race"
+	_ "github.com/yu-be-shi/character-api/docs"
 )
 
 type echoValidator struct {
@@ -41,6 +43,7 @@ func New(cfg config.Config, charSvc *charUsecase.Service, raceSvc *raceUsecase.S
 	}))
 
 	e.GET("/healthz", handler.Health)
+	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
 	api := e.Group("/api/v1", apimw.InternalAPIKey(cfg.InternalAPIKey))
 	handler.NewCharacterHandler(charSvc).Register(api.Group("/characters"))

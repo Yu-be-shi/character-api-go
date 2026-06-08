@@ -8,6 +8,9 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/labstack/echo/v4 v4.12.0
 	github.com/stretchr/testify v1.9.0
+	github.com/swaggo/echo-swagger v1.4.1
+	github.com/swaggo/files/v2 v2.0.1
+	github.com/swaggo/swag v1.16.4
 	gorm.io/datatypes v1.2.5
 	gorm.io/driver/postgres v1.5.11
 	gorm.io/gorm v1.25.12

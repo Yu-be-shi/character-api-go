@@ -9,8 +9,8 @@
 |---|---|
 | Web フレームワーク | Go + Echo v4 |
 | ORM | GORM |
-| DB | PostgreSQL（Repo3） |
-| マイグレーション | 独自ランナー（`embed.FS` + SQL） |
+| DB | PostgreSQL（`character-db`） |
+| マイグレーション | **持たない**（スキーマは `character-db` の Atlas が管理） |
 
 ## アーキテクチャ
 
@@ -23,27 +23,28 @@ interfaces/http → usecase → domain ← infrastructure/persistence
 ## 起動方法
 
 ```bash
-# 環境変数の準備
-cp .env.example .env  # Repo4 の .env.example を参照
+# ローカル開発（推奨）: API 専用インフラの docker-compose から起動する。
+# 事前に character-db-infra を起動して character-db-net / DB を用意しておくこと。
+cd ../character-api-go-infra && docker compose up --build -d
 
-# ローカル開発（Repo4 の docker-compose から起動推奨）
-docker compose up
+# Air によるホットリロード単体開発
+make dev
 ```
 
 ## マイグレーション
 
-マイグレーションは API サーバー起動時に自動実行される（`migrate subcommand` を Repo4 が init container として呼び出す）。
+この API はマイグレーションを **持たない**。スキーマ（テーブル・ビュー・ENUM）は
+`character-db` リポジトリの宣言的定義（`schema.sql`）と Atlas マイグレーションが
+唯一の正であり、適用は `character-db-migrate` サービスが行う。
 
-新規マイグレーションファイルの作成:
-
-```bash
-make migration name=add_description_to_characters
-```
+スキーマを変更したいときは `character-db/` 側で `make migration` / `make hash` を実行する。
+カラムの削除・リネームは、この API を含む全 API が対応済みになってから行うこと。
 
 ## サービス間認証
 
 すべての `/api/v1/*` エンドポイントは `X-Internal-API-Key` ヘッダーを必須とする。
-キーは環境変数 `INTERNAL_API_KEY` で設定する（Repo4 の `.env` で管理）。
+キーは環境変数 `INTERNAL_API_KEY` で設定し、application 側の `CHARACTER_API_KEY` と
+同じ値にする（不一致だと 401 を返す）。
 
 ## API エンドポイント
 
@@ -54,7 +55,13 @@ make migration name=add_description_to_characters
 | POST | /api/v1/characters | 新規作成 |
 | GET | /api/v1/characters/:id | 単件取得 |
 | PUT | /api/v1/characters/:id | 更新 |
-| DELETE | /api/v1/characters/:id | 削除 |
+| DELETE | /api/v1/characters/:id | 削除（論理削除: deleted_at を設定） |
+| GET | /api/v1/races | 種族一覧取得 |
+| POST | /api/v1/races | 種族新規作成 |
+| GET | /api/v1/races/:id | 種族単件取得 |
+| PUT | /api/v1/races/:id | 種族更新 |
+| DELETE | /api/v1/races/:id | 種族削除 |
+| GET | /swagger/* | Swagger UI（OpenAPI） |
 
 ## 環境変数
 

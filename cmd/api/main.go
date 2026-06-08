@@ -1,3 +1,14 @@
+// @title           Character API
+// @version         1.0
+// @description     キャラクター管理 REST API
+// @host            localhost:8080
+// @BasePath        /
+//
+// @securityDefinitions.apikey  InternalAPIKey
+// @in                          header
+// @name                        X-Internal-API-Key
+// @description                 内部サービス間認証キー
+
 package main
 
 import (

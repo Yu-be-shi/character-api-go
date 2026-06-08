@@ -65,7 +65,7 @@ type CreateCharacterRequest struct {
 	BirthPlace  string     `json:"birthPlace"  validate:"omitempty,max=150"`
 	HeightCm    *int16     `json:"heightCm"    validate:"omitempty,min=1"`
 	WeightKg    *int16     `json:"weightKg"    validate:"omitempty,min=1"`
-	BodyFat     *float32   `json:"bodyFat"     validate:"omitempty,min=0,max=100"`
+	BodyFat     *float32   `json:"bodyFatPercentage" validate:"omitempty,min=0,max=100"`
 	SizeTop     *int16     `json:"sizeTop"     validate:"omitempty,min=1"`
 	SizeMiddle  *int16     `json:"sizeMiddle"  validate:"omitempty,min=1"`
 	SizeBottom  *int16     `json:"sizeBottom"  validate:"omitempty,min=1"`
@@ -80,7 +80,7 @@ type UpdateCharacterRequest struct {
 	BirthPlace  *string    `json:"birthPlace"  validate:"omitempty,max=150"`
 	HeightCm    *int16     `json:"heightCm"    validate:"omitempty,min=1"`
 	WeightKg    *int16     `json:"weightKg"    validate:"omitempty,min=1"`
-	BodyFat     *float32   `json:"bodyFat"     validate:"omitempty,min=0,max=100"`
+	BodyFat     *float32   `json:"bodyFatPercentage" validate:"omitempty,min=0,max=100"`
 	SizeTop     *int16     `json:"sizeTop"     validate:"omitempty,min=1"`
 	SizeMiddle  *int16     `json:"sizeMiddle"  validate:"omitempty,min=1"`
 	SizeBottom  *int16     `json:"sizeBottom"  validate:"omitempty,min=1"`

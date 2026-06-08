@@ -29,6 +29,14 @@ func (h *CharacterHandler) Register(g *echo.Group) {
 	g.DELETE("/:id", h.Delete)
 }
 
+// List godoc
+// @Summary      キャラクター一覧取得
+// @Tags         characters
+// @Produce      json
+// @Security     InternalAPIKey
+// @Success      200  {array}   dto.CharacterResponse
+// @Failure      500  {object}  dto.ErrorResponse
+// @Router       /api/v1/characters [get]
 func (h *CharacterHandler) List(c echo.Context) error {
 	cs, err := h.svc.List(c.Request().Context())
 	if err != nil {
@@ -37,6 +45,18 @@ func (h *CharacterHandler) List(c echo.Context) error {
 	return c.JSON(http.StatusOK, dto.FromDomainList(cs))
 }
 
+// Create godoc
+// @Summary      キャラクター作成
+// @Tags         characters
+// @Accept       json
+// @Produce      json
+// @Security     InternalAPIKey
+// @Param        body  body      dto.CreateCharacterRequest  true  "キャラクター作成リクエスト"
+// @Success      201   {object}  dto.CharacterResponse
+// @Failure      400   {object}  dto.ErrorResponse
+// @Failure      422   {object}  dto.ErrorResponse
+// @Failure      500   {object}  dto.ErrorResponse
+// @Router       /api/v1/characters [post]
 func (h *CharacterHandler) Create(c echo.Context) error {
 	var req dto.CreateCharacterRequest
 	if err := c.Bind(&req); err != nil {
@@ -65,6 +85,17 @@ func (h *CharacterHandler) Create(c echo.Context) error {
 	return c.JSON(http.StatusCreated, dto.FromDomain(out))
 }
 
+// Get godoc
+// @Summary      キャラクター取得
+// @Tags         characters
+// @Produce      json
+// @Security     InternalAPIKey
+// @Param        id   path      string  true  "キャラクターID (UUID)"
+// @Success      200  {object}  dto.CharacterResponse
+// @Failure      400  {object}  dto.ErrorResponse
+// @Failure      404  {object}  dto.ErrorResponse
+// @Failure      500  {object}  dto.ErrorResponse
+// @Router       /api/v1/characters/{id} [get]
 func (h *CharacterHandler) Get(c echo.Context) error {
 	id, err := parseID(c)
 	if err != nil {
@@ -77,6 +108,20 @@ func (h *CharacterHandler) Get(c echo.Context) error {
 	return c.JSON(http.StatusOK, dto.FromDomain(out))
 }
 
+// Update godoc
+// @Summary      キャラクター更新
+// @Tags         characters
+// @Accept       json
+// @Produce      json
+// @Security     InternalAPIKey
+// @Param        id    path      string                      true  "キャラクターID (UUID)"
+// @Param        body  body      dto.UpdateCharacterRequest  true  "キャラクター更新リクエスト"
+// @Success      200   {object}  dto.CharacterResponse
+// @Failure      400   {object}  dto.ErrorResponse
+// @Failure      404   {object}  dto.ErrorResponse
+// @Failure      422   {object}  dto.ErrorResponse
+// @Failure      500   {object}  dto.ErrorResponse
+// @Router       /api/v1/characters/{id} [put]
 func (h *CharacterHandler) Update(c echo.Context) error {
 	id, err := parseID(c)
 	if err != nil {
@@ -118,6 +163,16 @@ func (h *CharacterHandler) Update(c echo.Context) error {
 	return c.JSON(http.StatusOK, dto.FromDomain(out))
 }
 
+// Delete godoc
+// @Summary      キャラクター削除
+// @Tags         characters
+// @Security     InternalAPIKey
+// @Param        id   path  string  true  "キャラクターID (UUID)"
+// @Success      204
+// @Failure      400  {object}  dto.ErrorResponse
+// @Failure      404  {object}  dto.ErrorResponse
+// @Failure      500  {object}  dto.ErrorResponse
+// @Router       /api/v1/characters/{id} [delete]
 func (h *CharacterHandler) Delete(c echo.Context) error {
 	id, err := parseID(c)
 	if err != nil {

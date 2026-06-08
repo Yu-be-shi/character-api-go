@@ -12,11 +12,11 @@ import (
 	"github.com/yu-be-shi/character-api/internal/config"
 )
 
-// Open は設定済み *gorm.DB を返し、マイグレーションも実行する。
+// Open は設定済み *gorm.DB を返す。
+// マイグレーションはこの API では行わない（スキーマは character-db の Atlas が管理する）。
 func Open(cfg config.DBConfig) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{
-		Logger:                                   gormlogger.Default.LogMode(gormlogger.Warn),
-		DisableForeignKeyConstraintWhenMigrating: false,
+		Logger: gormlogger.Default.LogMode(gormlogger.Warn),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("gormrepo: open: %w", err)

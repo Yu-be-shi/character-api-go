@@ -26,4 +26,5 @@ COPY --from=build /out/api /app/api
 EXPOSE 8080
 USER nonroot:nonroot
 ENTRYPOINT ["/app/api"]
-# CMD は未設定: docker-compose の command で "migrate" / デフォルト(serve) を切り替える
+# このバイナリは HTTP サーバーを起動するだけ（サブコマンドなし）。
+# マイグレーションはこの API では行わない（スキーマ適用は character-db-migrate が担当）。
