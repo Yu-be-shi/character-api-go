@@ -133,12 +133,23 @@ func (r *CharacterRepository) FindByID(ctx context.Context, id uuid.UUID) (*doma
 	return fromCharacterModel(&m), nil
 }
 
-func (r *CharacterRepository) List(ctx context.Context) ([]*domain.Character, error) {
+func (r *CharacterRepository) List(ctx context.Context, p domain.ListParams) ([]*domain.Character, error) {
+	// IDs 指定で空スライスのときは「該当なし」を意味するので空を返す（全件返さない）。
+	if p.IDs != nil && len(p.IDs) == 0 {
+		return []*domain.Character{}, nil
+	}
+	q := withRace(r.db.WithContext(ctx)).Order("core_characters.created_at ASC")
+	if len(p.IDs) > 0 {
+		q = q.Where("core_characters.id IN ?", p.IDs)
+	}
+	if p.Limit > 0 {
+		q = q.Limit(p.Limit)
+	}
+	if p.Offset > 0 {
+		q = q.Offset(p.Offset)
+	}
 	var ms []coreCharacterModel
-	err := withRace(r.db.WithContext(ctx)).
-		Order("core_characters.created_at ASC").
-		Find(&ms).Error
-	if err != nil {
+	if err := q.Find(&ms).Error; err != nil {
 		return nil, fmt.Errorf("gormrepo: list characters: %w", err)
 	}
 	out := make([]*domain.Character, 0, len(ms))

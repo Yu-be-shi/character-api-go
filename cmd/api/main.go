@@ -48,13 +48,20 @@ func run() error {
 		return err
 	}
 
+	// /readyz 用の DB ping。sql.DB.PingContext で接続可否を確認する。
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	pingDB := func(ctx context.Context) error { return sqlDB.PingContext(ctx) }
+
 	raceRepo := gormrepo.NewRaceRepository(db)
 	charRepo := gormrepo.NewCharacterRepository(db)
 
 	raceSvc := raceUsecase.NewService(raceRepo)
 	charSvc := charUsecase.NewService(charRepo, raceRepo, nil)
 
-	e := httpiface.New(cfg, charSvc, raceSvc)
+	e := httpiface.New(cfg, charSvc, raceSvc, pingDB)
 
 	srvErr := make(chan error, 1)
 	go func() {

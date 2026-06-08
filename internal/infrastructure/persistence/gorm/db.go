@@ -17,6 +17,9 @@ import (
 func Open(cfg config.DBConfig) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Warn),
+		// ドライバ固有のエラーを gorm.ErrDuplicatedKey / ErrForeignKeyViolated 等へ変換し、
+		// リポジトリがドメインエラー（ErrDuplicate 等）へマッピングできるようにする。
+		TranslateError: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("gormrepo: open: %w", err)

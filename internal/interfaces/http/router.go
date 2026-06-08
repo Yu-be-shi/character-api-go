@@ -1,6 +1,7 @@
 package httpiface
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-playground/validator/v10"
@@ -9,6 +10,7 @@ import (
 	echoSwagger "github.com/swaggo/echo-swagger"
 
 	"github.com/yu-be-shi/character-api/internal/config"
+	chardomain "github.com/yu-be-shi/character-api/internal/domain/character"
 	"github.com/yu-be-shi/character-api/internal/interfaces/http/handler"
 	apimw "github.com/yu-be-shi/character-api/internal/interfaces/http/middleware"
 	charUsecase "github.com/yu-be-shi/character-api/internal/usecase/character"
@@ -27,11 +29,22 @@ func (ev *echoValidator) Validate(i any) error {
 	return nil
 }
 
-func New(cfg config.Config, charSvc *charUsecase.Service, raceSvc *raceUsecase.Service) *echo.Echo {
+// newValidator は許可 gender をドメイン（chardomain.AllGenders）から取る
+// カスタムバリデーション "gender" を登録する。DTO 側の oneof 文字列重複を排除する。
+func newValidator() *validator.Validate {
+	v := validator.New()
+	_ = v.RegisterValidation("gender", func(fl validator.FieldLevel) bool {
+		return chardomain.Gender(fl.Field().String()).Valid()
+	})
+	return v
+}
+
+// New は HTTP ルーターを構築する。pingDB は /readyz の依存チェックに使う（nil 可）。
+func New(cfg config.Config, charSvc *charUsecase.Service, raceSvc *raceUsecase.Service, pingDB func(context.Context) error) *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
-	e.Validator = &echoValidator{v: validator.New()}
+	e.Validator = &echoValidator{v: newValidator()}
 
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestID())
@@ -39,10 +52,13 @@ func New(cfg config.Config, charSvc *charUsecase.Service, raceSvc *raceUsecase.S
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: cfg.CORSOrigins,
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
-		AllowHeaders: []string{echo.HeaderContentType, echo.HeaderAuthorization},
+		AllowHeaders: []string{echo.HeaderContentType, apimw.InternalAPIKeyHeader},
 	}))
 
 	e.GET("/healthz", handler.Health)
+	if pingDB != nil {
+		e.GET("/readyz", handler.Ready(pingDB))
+	}
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
 	api := e.Group("/api/v1", apimw.InternalAPIKey(cfg.InternalAPIKey))

@@ -60,7 +60,7 @@ type CreateCharacterRequest struct {
 	Name        string     `json:"name"        validate:"required,min=1,max=100"`
 	Description string     `json:"description" validate:"omitempty,max=5000"`
 	RaceID      uuid.UUID  `json:"raceId"      validate:"required"`
-	Gender      string     `json:"gender"      validate:"required,oneof=male female other unknown"`
+	Gender      string     `json:"gender"      validate:"required,gender"`
 	BirthDate   *time.Time `json:"birthDate"   validate:"omitempty"`
 	BirthPlace  string     `json:"birthPlace"  validate:"omitempty,max=150"`
 	HeightCm    *int16     `json:"heightCm"    validate:"omitempty,min=1"`
@@ -75,7 +75,7 @@ type UpdateCharacterRequest struct {
 	Name        *string    `json:"name"        validate:"omitempty,min=1,max=100"`
 	Description *string    `json:"description" validate:"omitempty,max=5000"`
 	RaceID      *uuid.UUID `json:"raceId"      validate:"omitempty"`
-	Gender      *string    `json:"gender"      validate:"omitempty,oneof=male female other unknown"`
+	Gender      *string    `json:"gender"      validate:"omitempty,gender"`
 	BirthDate   *time.Time `json:"birthDate"   validate:"omitempty"`
 	BirthPlace  *string    `json:"birthPlace"  validate:"omitempty,max=150"`
 	HeightCm    *int16     `json:"heightCm"    validate:"omitempty,min=1"`

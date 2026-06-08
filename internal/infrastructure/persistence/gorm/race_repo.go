@@ -39,6 +39,9 @@ var _ domain.Repository = (*RaceRepository)(nil)
 func (r *RaceRepository) Save(ctx context.Context, race *domain.Race) error {
 	m := toRaceModel(race)
 	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return domain.ErrDuplicate
+		}
 		return fmt.Errorf("gormrepo: save race: %w", err)
 	}
 	return nil
@@ -48,6 +51,9 @@ func (r *RaceRepository) Update(ctx context.Context, race *domain.Race) error {
 	m := toRaceModel(race)
 	res := r.db.WithContext(ctx).Save(m)
 	if res.Error != nil {
+		if errors.Is(res.Error, gorm.ErrDuplicatedKey) {
+			return domain.ErrDuplicate
+		}
 		return fmt.Errorf("gormrepo: update race: %w", res.Error)
 	}
 	if res.RowsAffected == 0 {

@@ -50,8 +50,9 @@ make dev
 
 | Method | Path | 説明 |
 |---|---|---|
-| GET | /healthz | ヘルスチェック（認証不要） |
-| GET | /api/v1/characters | 一覧取得 |
+| GET | /healthz | Liveness（認証不要・依存に触れない） |
+| GET | /readyz | Readiness（認証不要・DB ping 込み。NG 時 503） |
+| GET | /api/v1/characters | 一覧取得（`?ids=<uuid,...>` でバッチ取得 / `?limit=&offset=` でページング） |
 | POST | /api/v1/characters | 新規作成 |
 | GET | /api/v1/characters/:id | 単件取得 |
 | PUT | /api/v1/characters/:id | 更新 |

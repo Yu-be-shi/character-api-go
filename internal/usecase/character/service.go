@@ -72,8 +72,8 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (*domain.Character, err
 	return s.repo.FindByID(ctx, id)
 }
 
-func (s *Service) List(ctx context.Context) ([]*domain.Character, error) {
-	return s.repo.List(ctx)
+func (s *Service) List(ctx context.Context, p domain.ListParams) ([]*domain.Character, error) {
+	return s.repo.List(ctx, p)
 }
 
 type UpdateInput struct {

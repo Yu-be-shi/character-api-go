@@ -63,9 +63,19 @@ func (r *fakeCharRepo) FindByID(_ context.Context, id uuid.UUID) (*domain.Charac
 	return &cp, nil
 }
 
-func (r *fakeCharRepo) List(_ context.Context) ([]*domain.Character, error) {
+func (r *fakeCharRepo) List(_ context.Context, p domain.ListParams) ([]*domain.Character, error) {
+	if p.IDs != nil && len(p.IDs) == 0 {
+		return []*domain.Character{}, nil
+	}
+	want := map[uuid.UUID]bool{}
+	for _, id := range p.IDs {
+		want[id] = true
+	}
 	out := make([]*domain.Character, 0, len(r.store))
 	for _, c := range r.store {
+		if len(p.IDs) > 0 && !want[c.ID] {
+			continue
+		}
 		cp := *c
 		out = append(out, &cp)
 	}
@@ -300,7 +310,7 @@ func TestService_List(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	cs, err := svc.List(context.Background())
+	cs, err := svc.List(context.Background(), domain.ListParams{})
 	require.NoError(t, err)
 	assert.Len(t, cs, 2)
 }
