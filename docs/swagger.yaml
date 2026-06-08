@@ -1,0 +1,528 @@
+basePath: /
+definitions:
+  github_com_yu-be-shi_character-api_internal_interfaces_http_dto.CharacterResponse:
+    properties:
+      birthDate:
+        type: string
+      birthPlace:
+        type: string
+      bodyFatPercentage:
+        type: number
+      createdAt:
+        type: string
+      description:
+        type: string
+      gender:
+        type: string
+      heightCm:
+        type: integer
+      id:
+        type: string
+      name:
+        type: string
+      race:
+        type: string
+      raceId:
+        type: string
+      sizeBottom:
+        type: integer
+      sizeMiddle:
+        type: integer
+      sizeTop:
+        type: integer
+      updatedAt:
+        type: string
+      weightKg:
+        type: integer
+    type: object
+  github_com_yu-be-shi_character-api_internal_interfaces_http_dto.CreateCharacterRequest:
+    properties:
+      birthDate:
+        type: string
+      birthPlace:
+        maxLength: 150
+        type: string
+      bodyFatPercentage:
+        maximum: 100
+        minimum: 0
+        type: number
+      description:
+        maxLength: 5000
+        type: string
+      gender:
+        type: string
+      heightCm:
+        minimum: 1
+        type: integer
+      name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      raceId:
+        type: string
+      sizeBottom:
+        minimum: 1
+        type: integer
+      sizeMiddle:
+        minimum: 1
+        type: integer
+      sizeTop:
+        minimum: 1
+        type: integer
+      weightKg:
+        minimum: 1
+        type: integer
+    required:
+    - gender
+    - name
+    - raceId
+    type: object
+  github_com_yu-be-shi_character-api_internal_interfaces_http_dto.CreateRaceRequest:
+    properties:
+      name:
+        maxLength: 50
+        minLength: 1
+        type: string
+    required:
+    - name
+    type: object
+  github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse:
+    properties:
+      details:
+        additionalProperties: {}
+        type: object
+      message:
+        type: string
+    type: object
+  github_com_yu-be-shi_character-api_internal_interfaces_http_dto.RaceResponse:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  github_com_yu-be-shi_character-api_internal_interfaces_http_dto.UpdateCharacterRequest:
+    properties:
+      birthDate:
+        type: string
+      birthPlace:
+        maxLength: 150
+        type: string
+      bodyFatPercentage:
+        maximum: 100
+        minimum: 0
+        type: number
+      description:
+        maxLength: 5000
+        type: string
+      gender:
+        type: string
+      heightCm:
+        minimum: 1
+        type: integer
+      name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      raceId:
+        type: string
+      sizeBottom:
+        minimum: 1
+        type: integer
+      sizeMiddle:
+        minimum: 1
+        type: integer
+      sizeTop:
+        minimum: 1
+        type: integer
+      weightKg:
+        minimum: 1
+        type: integer
+    type: object
+  github_com_yu-be-shi_character-api_internal_interfaces_http_dto.UpdateRaceRequest:
+    properties:
+      name:
+        maxLength: 50
+        minLength: 1
+        type: string
+    required:
+    - name
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: キャラクター管理 REST API
+  title: Character API
+  version: "1.0"
+paths:
+  /api/v1/characters:
+    get:
+      description: ?ids=<uuid,...> でバッチ取得、?limit= / ?offset= でページング
+      parameters:
+      - description: カンマ区切りの UUID（指定時はその ID のみ返す）
+        in: query
+        name: ids
+        type: string
+      - description: 最大件数（1..500）
+        in: query
+        name: limit
+        type: integer
+      - description: オフセット
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.CharacterResponse'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: キャラクター一覧取得
+      tags:
+      - characters
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: キャラクター作成リクエスト
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.CreateCharacterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.CharacterResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: キャラクター作成
+      tags:
+      - characters
+  /api/v1/characters/{id}:
+    delete:
+      parameters:
+      - description: キャラクターID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: キャラクター削除
+      tags:
+      - characters
+    get:
+      parameters:
+      - description: キャラクターID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.CharacterResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: キャラクター取得
+      tags:
+      - characters
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: キャラクターID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: キャラクター更新リクエスト
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.UpdateCharacterRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.CharacterResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: キャラクター更新
+      tags:
+      - characters
+  /api/v1/races:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.RaceResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: 種族一覧取得
+      tags:
+      - races
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 種族作成リクエスト
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.CreateRaceRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.RaceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: 種族作成
+      tags:
+      - races
+  /api/v1/races/{id}:
+    delete:
+      parameters:
+      - description: 種族ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: 種族削除
+      tags:
+      - races
+    get:
+      parameters:
+      - description: 種族ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.RaceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: 種族取得
+      tags:
+      - races
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 種族ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 種族更新リクエスト
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.UpdateRaceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.RaceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_yu-be-shi_character-api_internal_interfaces_http_dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: 種族更新
+      tags:
+      - races
+  /healthz:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Liveness（プロセス生存）。依存に触れない。
+      tags:
+      - health
+  /readyz:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Readiness（DB 接続確認込み）
+      tags:
+      - health
+securityDefinitions:
+  InternalAPIKey:
+    description: 内部サービス間認証キー
+    in: header
+    name: X-Internal-API-Key
+    type: apiKey
+swagger: "2.0"
