@@ -3,6 +3,8 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -29,20 +31,67 @@ func (h *CharacterHandler) Register(g *echo.Group) {
 	g.DELETE("/:id", h.Delete)
 }
 
+// maxListLimit は ?limit= で指定できる最大件数（無制限取得を防ぐ）。
+const maxListLimit = 500
+
 // List godoc
 // @Summary      キャラクター一覧取得
+// @Description  ?ids=<uuid,...> でバッチ取得、?limit= / ?offset= でページング
 // @Tags         characters
 // @Produce      json
 // @Security     InternalAPIKey
+// @Param        ids     query     string  false  "カンマ区切りの UUID（指定時はその ID のみ返す）"
+// @Param        limit   query     int     false  "最大件数（1..500）"
+// @Param        offset  query     int     false  "オフセット"
 // @Success      200  {array}   dto.CharacterResponse
+// @Failure      400  {object}  dto.ErrorResponse
 // @Failure      500  {object}  dto.ErrorResponse
 // @Router       /api/v1/characters [get]
 func (h *CharacterHandler) List(c echo.Context) error {
-	cs, err := h.svc.List(c.Request().Context())
+	p, err := parseListParams(c)
+	if err != nil {
+		return err
+	}
+	cs, err := h.svc.List(c.Request().Context(), p)
 	if err != nil {
 		return mapCharErr(err)
 	}
 	return c.JSON(http.StatusOK, dto.FromDomainList(cs))
+}
+
+func parseListParams(c echo.Context) (chardomain.ListParams, error) {
+	var p chardomain.ListParams
+
+	if raw := strings.TrimSpace(c.QueryParam("ids")); raw != "" {
+		p.IDs = []uuid.UUID{} // 空でない ids が来たら「絞り込みあり」を明示
+		for _, s := range strings.Split(raw, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			id, err := uuid.Parse(s)
+			if err != nil {
+				return p, echo.NewHTTPError(http.StatusBadRequest, "invalid id in ids")
+			}
+			p.IDs = append(p.IDs, id)
+		}
+	}
+
+	if raw := c.QueryParam("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxListLimit {
+			return p, echo.NewHTTPError(http.StatusBadRequest, "limit must be 1..500")
+		}
+		p.Limit = n
+	}
+	if raw := c.QueryParam("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			return p, echo.NewHTTPError(http.StatusBadRequest, "offset must be >= 0")
+		}
+		p.Offset = n
+	}
+	return p, nil
 }
 
 // Create godoc

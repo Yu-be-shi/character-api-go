@@ -30,10 +30,15 @@ const (
 	GenderUnknown Gender = "unknown"
 )
 
+// AllGenders は許可される gender の唯一の定義。バリデーション等はここを参照し、
+// 値の一覧を各所にハードコードしない（DTO の oneof 文字列の重複を排除する）。
+var AllGenders = []Gender{GenderMale, GenderFemale, GenderOther, GenderUnknown}
+
 func (g Gender) Valid() bool {
-	switch g {
-	case GenderMale, GenderFemale, GenderOther, GenderUnknown:
-		return true
+	for _, v := range AllGenders {
+		if g == v {
+			return true
+		}
 	}
 	return false
 }
