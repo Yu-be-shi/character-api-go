@@ -1,5 +1,8 @@
 # character-api
 
+[![CI](https://github.com/Yu-be-shi/character-api-go/actions/workflows/ci.yml/badge.svg)](https://github.com/Yu-be-shi/character-api-go/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Yu-be-shi/character-api-go/actions/workflows/codeql.yml/badge.svg)](https://github.com/Yu-be-shi/character-api-go/actions/workflows/codeql.yml)
+
 キャラクターデータの CRUD を行うコアAPI。
 ユーザー情報に一切依存しない、ピュアなキャラクターデータ管理サービス。
 
