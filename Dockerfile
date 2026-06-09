@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ── dev: Air によるホットリロード ────────────────────────────────────────────────
-FROM golang:1.23-alpine AS dev
+FROM golang:1.24-alpine AS dev
 WORKDIR /app
 RUN apk add --no-cache git ca-certificates \
     && go install github.com/air-verse/air@v1.52.3
@@ -11,7 +11,7 @@ EXPOSE 8080
 CMD ["sh", "-c", "go mod tidy && air -c .air.toml"]
 
 # ── build: 静的バイナリの生成 ─────────────────────────────────────────────────────
-FROM golang:1.23-alpine AS build
+FROM golang:1.24-alpine AS build
 WORKDIR /app
 RUN apk add --no-cache git ca-certificates
 COPY go.mod go.sum* ./

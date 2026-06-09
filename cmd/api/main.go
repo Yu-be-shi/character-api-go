@@ -14,6 +14,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,11 +24,15 @@ import (
 	"time"
 
 	"github.com/yu-be-shi/character-api/internal/config"
+	"github.com/yu-be-shi/character-api/internal/infrastructure/idempotency"
 	gormrepo "github.com/yu-be-shi/character-api/internal/infrastructure/persistence/gorm"
 	httpiface "github.com/yu-be-shi/character-api/internal/interfaces/http"
 	charUsecase "github.com/yu-be-shi/character-api/internal/usecase/character"
 	raceUsecase "github.com/yu-be-shi/character-api/internal/usecase/race"
 )
+
+// idempotencyTTL は冪等キーの保持期間（この期間内の同一キー再送は再生される）。
+const idempotencyTTL = 24 * time.Hour
 
 func main() {
 	if err := run(); err != nil {
@@ -59,9 +64,20 @@ func run() error {
 	charRepo := gormrepo.NewCharacterRepository(db)
 
 	raceSvc := raceUsecase.NewService(raceRepo)
-	charSvc := charUsecase.NewService(charRepo, raceRepo, nil)
+	charSvc := charUsecase.NewService(charRepo, nil)
 
-	e := httpiface.New(cfg, charSvc, raceSvc, pingDB)
+	// 冪等性キー用ストア（REDIS_ADDR 未設定なら無効）。
+	var idemStore idempotency.Store
+	if cfg.RedisAddr != "" {
+		rs := idempotency.NewRedisStore(cfg.RedisAddr, idempotencyTTL)
+		if err := rs.Ping(context.Background()); err != nil {
+			return fmt.Errorf("redis ping: %w", err)
+		}
+		idemStore = rs
+		slog.Info("idempotency enabled", "store", "redis", "addr", cfg.RedisAddr)
+	}
+
+	e := httpiface.New(cfg, charSvc, raceSvc, pingDB, idemStore)
 
 	srvErr := make(chan error, 1)
 	go func() {

@@ -20,5 +20,5 @@ generate:
 	docker run --rm \
 		-v $(shell pwd):/app \
 		-w /app \
-		golang:1.23-alpine \
+		golang:1.24-alpine \
 		sh -c "go install github.com/swaggo/swag/cmd/swag@latest && swag init -g cmd/api/main.go -o docs --parseInternal"

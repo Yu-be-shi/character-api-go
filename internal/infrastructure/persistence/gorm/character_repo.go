@@ -28,6 +28,7 @@ type coreCharacterModel struct {
 	SizeTop     *int16
 	SizeMiddle  *int16
 	SizeBottom  *int16
+	Version     int64
 	CreatedAt   time.Time  `gorm:"autoCreateTime:false"`
 	UpdatedAt   time.Time  `gorm:"autoUpdateTime:false"`
 	DeletedAt   *time.Time `gorm:"index"`
@@ -53,6 +54,7 @@ func toCharacterModel(c *domain.Character) *coreCharacterModel {
 		SizeTop:     c.SizeTop,
 		SizeMiddle:  c.SizeMiddle,
 		SizeBottom:  c.SizeBottom,
+		Version:     c.Version,
 		CreatedAt:   c.CreatedAt,
 		UpdatedAt:   c.UpdatedAt,
 	}
@@ -74,6 +76,7 @@ func fromCharacterModel(m *coreCharacterModel) *domain.Character {
 		SizeTop:     m.SizeTop,
 		SizeMiddle:  m.SizeMiddle,
 		SizeBottom:  m.SizeBottom,
+		Version:     m.Version,
 		CreatedAt:   m.CreatedAt,
 		UpdatedAt:   m.UpdatedAt,
 	}
@@ -100,21 +103,65 @@ var _ domain.Repository = (*CharacterRepository)(nil)
 func (r *CharacterRepository) Save(ctx context.Context, c *domain.Character) error {
 	m := toCharacterModel(c)
 	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+		// 参照先 race が無いと FK 違反になる。事前 SELECT せず、ここでドメインエラーへ変換する。
+		if errors.Is(err, gorm.ErrForeignKeyViolated) {
+			return domain.ErrRaceNotFound
+		}
 		return fmt.Errorf("gormrepo: save character: %w", err)
 	}
 	return nil
 }
 
-func (r *CharacterRepository) Update(ctx context.Context, c *domain.Character) error {
-	m := toCharacterModel(c)
-	res := r.db.WithContext(ctx).
-		Model(m).
-		Where("deleted_at IS NULL").
-		Updates(m)
+// updateAssignments は UPDATE で書き込む列の集合（map なので nil/空も NULL/空として確実に反映される。
+// GORM の Updates(struct) はゼロ値をスキップするため map を使う）。version は +1 し、id /
+// created_at / deleted_at は対象外。updated_at は DB トリガーでも更新されるが明示しておく。
+func updateAssignments(c *domain.Character) map[string]any {
+	return map[string]any{
+		"name":                c.Name,
+		"description":         c.Description,
+		"race_id":             c.RaceID,
+		"gender":              string(c.Gender),
+		"birth_date":          c.BirthDate,
+		"birth_place":         c.BirthPlace,
+		"height_cm":           c.HeightCm,
+		"weight_kg":           c.WeightKg,
+		"body_fat_percentage": c.BodyFat,
+		"size_top":            c.SizeTop,
+		"size_middle":         c.SizeMiddle,
+		"size_bottom":         c.SizeBottom,
+		"updated_at":          c.UpdatedAt,
+		"version":             gorm.Expr("version + 1"),
+	}
+}
+
+// Update は domain.Character の現在状態（PUT=全置換 / PATCH=部分適用済み）を全列上書きで永続化する。
+// expectedVersion が非 nil なら version 一致を条件にし、不一致は ErrVersionConflict。
+func (r *CharacterRepository) Update(ctx context.Context, c *domain.Character, expectedVersion *int64) error {
+	q := r.db.WithContext(ctx).
+		Model(&coreCharacterModel{}).
+		Where("id = ? AND deleted_at IS NULL", c.ID)
+	if expectedVersion != nil {
+		q = q.Where("version = ?", *expectedVersion)
+	}
+	res := q.Updates(updateAssignments(c))
 	if res.Error != nil {
+		if errors.Is(res.Error, gorm.ErrForeignKeyViolated) {
+			return domain.ErrRaceNotFound
+		}
 		return fmt.Errorf("gormrepo: update character: %w", res.Error)
 	}
 	if res.RowsAffected == 0 {
+		// version 指定時は「不在」か「版不一致」かを区別する（不一致の検出は競合時のみの追加クエリ）。
+		if expectedVersion != nil {
+			var n int64
+			if err := r.db.WithContext(ctx).Model(&coreCharacterModel{}).
+				Where("id = ? AND deleted_at IS NULL", c.ID).Count(&n).Error; err != nil {
+				return fmt.Errorf("gormrepo: update character (conflict check): %w", err)
+			}
+			if n > 0 {
+				return domain.ErrVersionConflict
+			}
+		}
 		return domain.ErrNotFound
 	}
 	return nil
@@ -157,6 +204,24 @@ func (r *CharacterRepository) List(ctx context.Context, p domain.ListParams) ([]
 		out = append(out, fromCharacterModel(&ms[i]))
 	}
 	return out, nil
+}
+
+// Count は List と同じ絞り込み（論理削除・IDs）での総件数を返す（Limit/Offset は無視）。
+func (r *CharacterRepository) Count(ctx context.Context, p domain.ListParams) (int64, error) {
+	if p.IDs != nil && len(p.IDs) == 0 {
+		return 0, nil
+	}
+	q := r.db.WithContext(ctx).
+		Model(&coreCharacterModel{}).
+		Where("deleted_at IS NULL")
+	if len(p.IDs) > 0 {
+		q = q.Where("id IN ?", p.IDs)
+	}
+	var n int64
+	if err := q.Count(&n).Error; err != nil {
+		return 0, fmt.Errorf("gormrepo: count characters: %w", err)
+	}
+	return n, nil
 }
 
 // Delete は論理削除（deleted_at を現在時刻に設定）。

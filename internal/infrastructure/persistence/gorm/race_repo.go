@@ -89,6 +89,10 @@ func (r *RaceRepository) List(ctx context.Context) ([]*domain.Race, error) {
 func (r *RaceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	res := r.db.WithContext(ctx).Delete(&raceModel{}, "id = ?", id)
 	if res.Error != nil {
+		// character から参照中の race は FK 制約（ON DELETE NO ACTION）で削除できない。
+		if errors.Is(res.Error, gorm.ErrForeignKeyViolated) {
+			return domain.ErrInUse
+		}
 		return fmt.Errorf("gormrepo: delete race: %w", res.Error)
 	}
 	if res.RowsAffected == 0 {

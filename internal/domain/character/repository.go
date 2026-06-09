@@ -17,8 +17,13 @@ type ListParams struct {
 
 type Repository interface {
 	Save(ctx context.Context, c *Character) error
-	Update(ctx context.Context, c *Character) error
+	// Update は c の状態を永続化する。expectedVersion が非 nil のときは
+	// 楽観ロックとして version 一致を条件にし、不一致なら ErrVersionConflict を返す。
+	Update(ctx context.Context, c *Character, expectedVersion *int64) error
 	FindByID(ctx context.Context, id uuid.UUID) (*Character, error)
 	List(ctx context.Context, p ListParams) ([]*Character, error)
+	// Count は List と同じ絞り込み条件（IDs・論理削除）での総件数を返す。
+	// Limit/Offset は無視する（ページャの total 表示用）。
+	Count(ctx context.Context, p ListParams) (int64, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 }

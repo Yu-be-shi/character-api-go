@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -134,6 +135,7 @@ func (h *RaceHandler) Update(c echo.Context) error {
 // @Success      204
 // @Failure      400  {object}  dto.ErrorResponse
 // @Failure      404  {object}  dto.ErrorResponse
+// @Failure      409  {object}  dto.ErrorResponse
 // @Failure      500  {object}  dto.ErrorResponse
 // @Router       /api/v1/races/{id} [delete]
 func (h *RaceHandler) Delete(c echo.Context) error {
@@ -155,7 +157,12 @@ func mapRaceErr(err error) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	case errors.Is(err, domain.ErrDuplicate):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	case errors.Is(err, domain.ErrInUse):
+		// character から参照中の race は削除できない（FK 制約）。
+		return echo.NewHTTPError(http.StatusConflict, "race is in use")
 	default:
-		return err
+		// 未分類のエラー（DB 障害など）。詳細はログにのみ残し、汎用 500 を返す。
+		slog.Error("unhandled race error", "error", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
 	}
 }
