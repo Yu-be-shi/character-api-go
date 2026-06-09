@@ -49,6 +49,13 @@ jobs:
         env:
           TEST_DB_DSN: "host=localhost user=app password=password dbname=testdb port=5432 sslmode=disable TimeZone=UTC"
 
+      # OpenAPI(Swagger) がコードと同期しているか（再生成して差分が無いこと）を検証する。
+      - name: swagger up-to-date (OpenAPI drift)
+        run: |
+          go install github.com/swaggo/swag/cmd/swag@v1.16.4
+          "$(go env GOPATH)/bin/swag" init -g cmd/api/main.go -o docs --parseInternal
+          git diff --exit-code docs/ || { echo "::error::swagger が古い。'make generate' を実行してコミットしてください"; exit 1; }
+
   # 依存の既知脆弱性（govulncheck）と秘密混入（gitleaks）の検査。
   security:
     runs-on: ubuntu-latest
@@ -67,6 +74,11 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           "$(go env GOPATH)/bin/govulncheck" ./...
+
+      - name: gosec (SAST)
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          "$(go env GOPATH)/bin/gosec" -quiet ./...
 
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
