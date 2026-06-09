@@ -20,6 +20,27 @@
 interfaces/http → usecase → domain ← infrastructure/persistence
 ```
 
+### エラーハンドリング
+
+ドメインエラー（`ErrNotFound` / `ErrInvalidName` / `ErrInvalidGender` / race の `ErrNotFound` 等）を
+`interfaces/http` の `mapCharErr` / `mapRaceErr` が HTTP ステータスへ変換する（404 / 400 / 422）。
+**未分類のエラー（DB 障害など）は内部詳細をクライアントに漏らさず、`slog` でサーバーログに残したうえで
+汎用 500 を返す**（`default` ケース）。
+
+## テスト
+
+```bash
+make test          # go test ./...（CI と同じ）
+go test ./internal/usecase/...   # ユースケースのみ
+```
+
+- **usecase 層**：リポジトリ interface の fake と `Clock` 注入でDB非依存にユニットテスト
+  （`usecase/character`, `usecase/race`）。
+- **interfaces/http 層**：`httptest` で実ルーター（`httpiface.New`）を起動し、APIキー認証（401）・
+  パラメータ検証（400）・エラーマッピング（404/422）・正常系（201）をエンドツーエンドに検証
+  （`internal/interfaces/http/router_test.go`）。
+- インメモリ fake を使うため、テスト実行に PostgreSQL は不要。
+
 ## 起動方法
 
 ```bash
