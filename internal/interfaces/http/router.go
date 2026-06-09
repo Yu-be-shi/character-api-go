@@ -11,6 +11,7 @@ import (
 
 	"github.com/yu-be-shi/character-api/internal/config"
 	chardomain "github.com/yu-be-shi/character-api/internal/domain/character"
+	"github.com/yu-be-shi/character-api/internal/infrastructure/idempotency"
 	"github.com/yu-be-shi/character-api/internal/interfaces/http/handler"
 	apimw "github.com/yu-be-shi/character-api/internal/interfaces/http/middleware"
 	charUsecase "github.com/yu-be-shi/character-api/internal/usecase/character"
@@ -40,7 +41,8 @@ func newValidator() *validator.Validate {
 }
 
 // New は HTTP ルーターを構築する。pingDB は /readyz の依存チェックに使う（nil 可）。
-func New(cfg config.Config, charSvc *charUsecase.Service, raceSvc *raceUsecase.Service, pingDB func(context.Context) error) *echo.Echo {
+// idemStore が非 nil のとき /api/v1 の POST に冪等性（Idempotency-Key）を適用する（nil 可）。
+func New(cfg config.Config, charSvc *charUsecase.Service, raceSvc *raceUsecase.Service, pingDB func(context.Context) error, idemStore idempotency.Store) *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -62,6 +64,10 @@ func New(cfg config.Config, charSvc *charUsecase.Service, raceSvc *raceUsecase.S
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
 	api := e.Group("/api/v1", apimw.InternalAPIKey(cfg.InternalAPIKey))
+	if idemStore != nil {
+		// POST のみ冪等化（ミドルウェア内で非 POST は素通し）。
+		api.Use(apimw.Idempotency(idemStore))
+	}
 	handler.NewCharacterHandler(charSvc).Register(api.Group("/characters"))
 	handler.NewRaceHandler(raceSvc).Register(api.Group("/races"))
 

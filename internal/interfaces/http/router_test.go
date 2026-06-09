@@ -2,6 +2,7 @@ package httpiface_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,18 +25,31 @@ const testAPIKey = "test-internal-key"
 // --- fakes（永続化はインメモリ。ハンドラ→usecase→domain の経路を実機に近い形で検証する）---
 
 type fakeCharRepo struct {
-	store map[uuid.UUID]*chardomain.Character
+	store     map[uuid.UUID]*chardomain.Character
+	raceValid func(uuid.UUID) bool // race の存在を模す（FK 違反 → ErrRaceNotFound）
 }
 
 func (r *fakeCharRepo) Save(_ context.Context, c *chardomain.Character) error {
+	if r.raceValid != nil && !r.raceValid(c.RaceID) {
+		return chardomain.ErrRaceNotFound
+	}
 	r.store[c.ID] = c
 	return nil
 }
-func (r *fakeCharRepo) Update(_ context.Context, c *chardomain.Character) error {
-	if _, ok := r.store[c.ID]; !ok {
+func (r *fakeCharRepo) Update(_ context.Context, c *chardomain.Character, expectedVersion *int64) error {
+	cur, ok := r.store[c.ID]
+	if !ok {
 		return chardomain.ErrNotFound
 	}
-	r.store[c.ID] = c
+	if r.raceValid != nil && !r.raceValid(c.RaceID) {
+		return chardomain.ErrRaceNotFound
+	}
+	if expectedVersion != nil && cur.Version != *expectedVersion {
+		return chardomain.ErrVersionConflict
+	}
+	cp := *c
+	cp.Version = cur.Version + 1
+	r.store[c.ID] = &cp
 	return nil
 }
 func (r *fakeCharRepo) FindByID(_ context.Context, id uuid.UUID) (*chardomain.Character, error) {
@@ -52,6 +66,10 @@ func (r *fakeCharRepo) List(_ context.Context, _ chardomain.ListParams) ([]*char
 	}
 	return out, nil
 }
+
+func (r *fakeCharRepo) Count(_ context.Context, _ chardomain.ListParams) (int64, error) {
+	return int64(len(r.store)), nil
+}
 func (r *fakeCharRepo) Delete(_ context.Context, id uuid.UUID) error {
 	if _, ok := r.store[id]; !ok {
 		return chardomain.ErrNotFound
@@ -62,6 +80,7 @@ func (r *fakeCharRepo) Delete(_ context.Context, id uuid.UUID) error {
 
 type fakeRaceRepo struct {
 	store map[uuid.UUID]*racedomain.Race
+	inUse func(uuid.UUID) bool // character から参照中かを模す（FK 違反 → ErrInUse）
 }
 
 func (r *fakeRaceRepo) Save(_ context.Context, race *racedomain.Race) error {
@@ -84,6 +103,9 @@ func (r *fakeRaceRepo) List(_ context.Context) ([]*racedomain.Race, error) {
 	return out, nil
 }
 func (r *fakeRaceRepo) Delete(_ context.Context, id uuid.UUID) error {
+	if r.inUse != nil && r.inUse(id) {
+		return racedomain.ErrInUse
+	}
 	delete(r.store, id)
 	return nil
 }
@@ -98,14 +120,25 @@ func newTestServer(t *testing.T) (*httptest.Server, uuid.UUID) {
 	require.NoError(t, err)
 	raceRepo.store[race.ID] = race
 
-	charSvc := charusecase.NewService(charRepo, raceRepo, nil)
+	// race の存在/参照中を2つの store を突き合わせて模す。
+	charRepo.raceValid = func(id uuid.UUID) bool { _, ok := raceRepo.store[id]; return ok }
+	raceRepo.inUse = func(id uuid.UUID) bool {
+		for _, c := range charRepo.store {
+			if c.RaceID == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	charSvc := charusecase.NewService(charRepo, nil)
 	raceSvc := raceusecase.NewService(raceRepo)
 
 	cfg := config.Config{
 		InternalAPIKey: testAPIKey,
 		CORSOrigins:    []string{"http://localhost:3000"},
 	}
-	e := httpiface.New(cfg, charSvc, raceSvc, nil)
+	e := httpiface.New(cfg, charSvc, raceSvc, nil, nil)
 	srv := httptest.NewServer(e)
 	t.Cleanup(srv.Close)
 	return srv, race.ID
@@ -198,4 +231,102 @@ func TestCreateCharacter_MissingName(t *testing.T) {
 	body := `{"raceId":"` + raceID.String() + `","gender":"female"}`
 	res := do(t, srv, http.MethodPost, "/api/v1/characters", testAPIKey, body)
 	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+}
+
+// createCharacter は POST でキャラを作り、生成された id を返すヘルパー。
+func createCharacter(t *testing.T, srv *httptest.Server, raceID uuid.UUID) string {
+	t.Helper()
+	body := `{"name":"アリス","raceId":"` + raceID.String() + `","gender":"female","heightCm":170}`
+	res := do(t, srv, http.MethodPost, "/api/v1/characters", testAPIKey, body)
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&created))
+	require.NotEmpty(t, created.ID)
+	return created.ID
+}
+
+func TestListCharacters_ReturnsItemsAndTotal(t *testing.T) {
+	srv, raceID := newTestServer(t)
+	createCharacter(t, srv, raceID)
+
+	res := do(t, srv, http.MethodGet, "/api/v1/characters", testAPIKey, "")
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var out struct {
+		Items []map[string]any `json:"items"`
+		Total int64            `json:"total"`
+	}
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&out))
+	assert.Len(t, out.Items, 1)
+	assert.Equal(t, int64(1), out.Total)
+}
+
+func TestReplaceCharacter_PUT(t *testing.T) {
+	srv, raceID := newTestServer(t)
+	id := createCharacter(t, srv, raceID)
+
+	// heightCm を省略して PUT（全置換）→ 200。クリアされる挙動は usecase テストで検証済み。
+	body := `{"name":"アリス改","raceId":"` + raceID.String() + `","gender":"female"}`
+	res := do(t, srv, http.MethodPut, "/api/v1/characters/"+id, testAPIKey, body)
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestPatchCharacter(t *testing.T) {
+	srv, raceID := newTestServer(t)
+	id := createCharacter(t, srv, raceID)
+
+	body := `{"name":"アリス部分更新"}`
+	res := do(t, srv, http.MethodPatch, "/api/v1/characters/"+id, testAPIKey, body)
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestReplaceCharacter_RaceNotFound(t *testing.T) {
+	srv, raceID := newTestServer(t)
+	id := createCharacter(t, srv, raceID)
+
+	body := `{"name":"アリス","raceId":"` + uuid.NewString() + `","gender":"female"}`
+	res := do(t, srv, http.MethodPut, "/api/v1/characters/"+id, testAPIKey, body)
+	assert.Equal(t, http.StatusUnprocessableEntity, res.StatusCode)
+}
+
+func TestDeleteRace_InUse_Conflict(t *testing.T) {
+	srv, raceID := newTestServer(t)
+	createCharacter(t, srv, raceID) // この race を使用中にする
+
+	res := do(t, srv, http.MethodDelete, "/api/v1/races/"+raceID.String(), testAPIKey, "")
+	assert.Equal(t, http.StatusConflict, res.StatusCode)
+}
+
+// putWithIfMatch は If-Match 付きで PUT する。
+func putWithIfMatch(t *testing.T, srv *httptest.Server, path, ifMatch, body string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPut, srv.URL+path, strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Internal-API-Key", testAPIKey)
+	req.Header.Set("If-Match", ifMatch)
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = res.Body.Close() })
+	return res
+}
+
+func TestReplaceCharacter_VersionConflict(t *testing.T) {
+	srv, raceID := newTestServer(t)
+	id := createCharacter(t, srv, raceID) // 版は 1
+
+	body := `{"name":"x","raceId":"` + raceID.String() + `","gender":"female"}`
+	res := putWithIfMatch(t, srv, "/api/v1/characters/"+id, `"999"`, body)
+	assert.Equal(t, http.StatusPreconditionFailed, res.StatusCode)
+}
+
+func TestReplaceCharacter_MatchingVersion_BumpsETag(t *testing.T) {
+	srv, raceID := newTestServer(t)
+	id := createCharacter(t, srv, raceID) // 版は 1
+
+	body := `{"name":"x","raceId":"` + raceID.String() + `","gender":"female"}`
+	res := putWithIfMatch(t, srv, "/api/v1/characters/"+id, `"1"`, body)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, `"2"`, res.Header.Get("ETag")) // 更新で版が +1
 }

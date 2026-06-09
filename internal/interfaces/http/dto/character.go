@@ -23,6 +23,7 @@ type CharacterResponse struct {
 	SizeTop     *int16     `json:"sizeTop,omitempty"`
 	SizeMiddle  *int16     `json:"sizeMiddle,omitempty"`
 	SizeBottom  *int16     `json:"sizeBottom,omitempty"`
+	Version     int64      `json:"version"` // 楽観ロック用。更新時に If-Match で送り返す
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
 }
@@ -43,6 +44,7 @@ func FromDomain(c *domain.Character) CharacterResponse {
 		SizeTop:     c.SizeTop,
 		SizeMiddle:  c.SizeMiddle,
 		SizeBottom:  c.SizeBottom,
+		Version:     c.Version,
 		CreatedAt:   c.CreatedAt,
 		UpdatedAt:   c.UpdatedAt,
 	}
@@ -54,6 +56,17 @@ func FromDomainList(cs []*domain.Character) []CharacterResponse {
 		out = append(out, FromDomain(c))
 	}
 	return out
+}
+
+// CharacterListResponse は一覧のレスポンス。items（このページの配列）と
+// total（Limit/Offset を無視した総件数）を返し、フロントがページャを作れるようにする。
+type CharacterListResponse struct {
+	Items []CharacterResponse `json:"items"`
+	Total int64               `json:"total"`
+}
+
+func NewCharacterListResponse(cs []*domain.Character, total int64) CharacterListResponse {
+	return CharacterListResponse{Items: FromDomainList(cs), Total: total}
 }
 
 type CreateCharacterRequest struct {

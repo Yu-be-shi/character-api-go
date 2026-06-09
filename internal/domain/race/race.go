@@ -13,6 +13,9 @@ var (
 	ErrNotFound    = errors.New("race not found")
 	ErrInvalidName = errors.New("invalid race name")
 	ErrDuplicate   = errors.New("race name already exists")
+	// ErrInUse は使用中（character から参照されている）の race を削除しようとしたとき返す。
+	// 外部キー制約（ON DELETE NO ACTION）の違反をこれに変換する。
+	ErrInUse = errors.New("race is in use")
 )
 
 const (

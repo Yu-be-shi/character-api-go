@@ -14,6 +14,11 @@ var (
 	ErrNotFound      = errors.New("character not found")
 	ErrInvalidName   = errors.New("invalid character name")
 	ErrInvalidGender = errors.New("invalid gender")
+	// ErrRaceNotFound は参照先の race が存在しないとき（外部キー違反）に返す。
+	// 作成・更新時に race_id の存在を事前 SELECT せず、DB の FK 制約違反をこれに変換する。
+	ErrRaceNotFound = errors.New("referenced race not found")
+	// ErrVersionConflict は楽観ロックの版不一致（別の更新が先に入った）ときに返す。
+	ErrVersionConflict = errors.New("version conflict")
 )
 
 const (
@@ -58,6 +63,7 @@ type Character struct {
 	SizeTop     *int16
 	SizeMiddle  *int16
 	SizeBottom  *int16
+	Version     int64 // 楽観ロック用。更新のたびに DB 側で +1 される
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -80,6 +86,7 @@ func New(name, description string, raceID uuid.UUID, gender Gender, now time.Tim
 		Description: description,
 		RaceID:      raceID,
 		Gender:      gender,
+		Version:     1,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}, nil
@@ -117,7 +124,50 @@ func (c *Character) Update(in UpdateFields, now time.Time) error {
 	return nil
 }
 
-// UpdateFields はすべてポインタ — nil は「変更しない」を意味する。
+// ReplaceFields は PUT（全置換）用。送られなかった任意項目は明示的に未設定（NULL/空）にする。
+// UpdateFields（PATCH・部分更新）と異なり「変更しない」概念は無く、常に全項目を上書きする。
+type ReplaceFields struct {
+	Name        string
+	Description string
+	RaceID      uuid.UUID
+	Gender      Gender
+	BirthDate   *time.Time
+	BirthPlace  string
+	HeightCm    *int16
+	WeightKg    *int16
+	BodyFat     *float32
+	SizeTop     *int16
+	SizeMiddle  *int16
+	SizeBottom  *int16
+}
+
+// Replace は PUT セマンティクス（全置換）。id / created_at / deleted_at 以外を丸ごと上書きし、
+// 任意項目の nil/空はそのまま未設定にする（＝既存値をクリアできる）。
+func (c *Character) Replace(f ReplaceFields, now time.Time) error {
+	name, err := normalizeName(f.Name)
+	if err != nil {
+		return err
+	}
+	if !f.Gender.Valid() {
+		return ErrInvalidGender
+	}
+	c.Name = name
+	c.Description = f.Description
+	c.RaceID = f.RaceID
+	c.Gender = f.Gender
+	c.BirthDate = f.BirthDate
+	c.BirthPlace = f.BirthPlace
+	c.HeightCm = f.HeightCm
+	c.WeightKg = f.WeightKg
+	c.BodyFat = f.BodyFat
+	c.SizeTop = f.SizeTop
+	c.SizeMiddle = f.SizeMiddle
+	c.SizeBottom = f.SizeBottom
+	c.UpdatedAt = now
+	return nil
+}
+
+// UpdateFields はすべてポインタ — nil は「変更しない」を意味する（PATCH・部分更新）。
 type UpdateFields struct {
 	Name        *string
 	Description *string

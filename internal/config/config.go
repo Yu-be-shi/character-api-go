@@ -14,6 +14,9 @@ type Config struct {
 	DB DBConfig
 
 	CORSOrigins []string `env:"CORS_ORIGINS" envSeparator:"," envDefault:"http://localhost:3000"`
+
+	// RedisAddr は冪等性キー用 Redis のアドレス（例: redis:6379）。空なら冪等性機能は無効。
+	RedisAddr string `env:"REDIS_ADDR" envDefault:""`
 }
 
 type DBConfig struct {
