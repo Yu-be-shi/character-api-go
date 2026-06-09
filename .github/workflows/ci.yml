@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main, develop]
 
+# 同一ブランチの古い実行はキャンセルして CI 資源を節約する。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -38,14 +43,14 @@ jobs:
         run: go vet ./...
 
       - name: test
-        run: go test ./...
+        run: go test -race ./...
         env:
           DB_DSN: "host=localhost user=app password=password dbname=testdb port=5432 sslmode=disable TimeZone=UTC"
           INTERNAL_API_KEY: test-key-for-ci
 
       # リポジトリ層の実 DB 統合テスト（version 条件付き UPDATE・FK→422・論理削除・updated_at トリガー）。
       - name: integration test (repository, real DB)
-        run: go test -tags=integration ./internal/infrastructure/persistence/gorm/...
+        run: go test -race -tags=integration ./internal/infrastructure/persistence/gorm/...
         env:
           TEST_DB_DSN: "host=localhost user=app password=password dbname=testdb port=5432 sslmode=disable TimeZone=UTC"
 
@@ -84,3 +89,11 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Dockerfile が壊れていないこと（runtime イメージがビルドできること）を検証。
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target runtime -t character-api:ci .
