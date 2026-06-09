@@ -321,6 +321,14 @@ func TestReplaceCharacter_VersionConflict(t *testing.T) {
 	assert.Equal(t, http.StatusPreconditionFailed, res.StatusCode)
 }
 
+func TestBodyLimit_RejectsLargeBody(t *testing.T) {
+	srv, raceID := newTestServer(t)
+	big := strings.Repeat("a", (1<<20)+1024) // 1MB 超
+	body := `{"name":"` + big + `","raceId":"` + raceID.String() + `","gender":"female"}`
+	res := do(t, srv, http.MethodPost, "/api/v1/characters", testAPIKey, body)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, res.StatusCode)
+}
+
 func TestReplaceCharacter_MatchingVersion_BumpsETag(t *testing.T) {
 	srv, raceID := newTestServer(t)
 	id := createCharacter(t, srv, raceID) // 版は 1

@@ -90,10 +90,25 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Dockerfile が壊れていないこと（runtime イメージがビルドできること）を検証。
+  # Dockerfile のビルド検証＋コンテナ脆弱性スキャン（trivy image, report-only SARIF）。
   docker:
-    name: Docker build
+    name: Docker build & scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       - run: docker build --target runtime -t character-api:ci .
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: character-api:ci
+          format: sarif
+          output: trivy-image.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
