@@ -29,8 +29,8 @@ func (h *CharacterHandler) Register(g *echo.Group) {
 	g.GET("", h.List)
 	g.POST("", h.Create)
 	g.GET("/:id", h.Get)
-	g.PUT("/:id", h.Replace)  // 全置換（省略した任意項目は NULL になる）
-	g.PATCH("/:id", h.Patch)  // 部分更新（送った項目だけ変更）
+	g.PUT("/:id", h.Replace) // 全置換（省略した任意項目は NULL になる）
+	g.PATCH("/:id", h.Patch) // 部分更新（送った項目だけ変更）
 	g.DELETE("/:id", h.Delete)
 }
 

@@ -8,7 +8,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	echoSwagger "github.com/swaggo/echo-swagger"
+	"golang.org/x/time/rate"
 
+	_ "github.com/yu-be-shi/character-api/docs"
 	"github.com/yu-be-shi/character-api/internal/config"
 	chardomain "github.com/yu-be-shi/character-api/internal/domain/character"
 	"github.com/yu-be-shi/character-api/internal/infrastructure/idempotency"
@@ -16,7 +18,6 @@ import (
 	apimw "github.com/yu-be-shi/character-api/internal/interfaces/http/middleware"
 	charUsecase "github.com/yu-be-shi/character-api/internal/usecase/character"
 	raceUsecase "github.com/yu-be-shi/character-api/internal/usecase/race"
-	_ "github.com/yu-be-shi/character-api/docs"
 )
 
 type echoValidator struct {
@@ -53,8 +54,8 @@ func New(cfg config.Config, charSvc *charUsecase.Service, raceSvc *raceUsecase.S
 	e.Use(middleware.Logger())
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: cfg.CORSOrigins,
-		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
-		AllowHeaders: []string{echo.HeaderContentType, apimw.InternalAPIKeyHeader},
+		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
+		AllowHeaders: []string{echo.HeaderContentType, apimw.InternalAPIKeyHeader, apimw.IdempotencyKeyHeader, "If-Match"},
 	}))
 
 	e.GET("/healthz", handler.Health)
@@ -64,6 +65,10 @@ func New(cfg config.Config, charSvc *charUsecase.Service, raceSvc *raceUsecase.S
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
 	api := e.Group("/api/v1", apimw.InternalAPIKey(cfg.InternalAPIKey))
+	if cfg.RateLimitRPS > 0 {
+		// IP あたりのレート制限（無料・インメモリ）。0 で無効。
+		api.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(cfg.RateLimitRPS))))
+	}
 	if idemStore != nil {
 		// POST のみ冪等化（ミドルウェア内で非 POST は素通し）。
 		api.Use(apimw.Idempotency(idemStore))

@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   test:
@@ -31,6 +31,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { echo "unformatted files:"; gofmt -l .; exit 1; }
+
       - name: vet
         run: go vet ./...
 
@@ -39,3 +42,33 @@ jobs:
         env:
           DB_DSN: "host=localhost user=app password=password dbname=testdb port=5432 sslmode=disable TimeZone=UTC"
           INTERNAL_API_KEY: test-key-for-ci
+
+      # リポジトリ層の実 DB 統合テスト（version 条件付き UPDATE・FK→422・論理削除・updated_at トリガー）。
+      - name: integration test (repository, real DB)
+        run: go test -tags=integration ./internal/infrastructure/persistence/gorm/...
+        env:
+          TEST_DB_DSN: "host=localhost user=app password=password dbname=testdb port=5432 sslmode=disable TimeZone=UTC"
+
+  # 依存の既知脆弱性（govulncheck）と秘密混入（gitleaks）の検査。
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks は全履歴を走査する
+
+      - uses: actions/setup-go@v5
+        with:
+          # 最新 stable で走らせ、標準ライブラリのパッチ済みバージョンで検査する
+          # （stdlib の脆弱性は常に「最新で修正済み」なので gate が陳腐化しない）。
+          go-version: stable
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

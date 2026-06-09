@@ -15,7 +15,7 @@ import (
 // coreCharacterModel は core_characters テーブルの GORM モデル。
 // ドメイン層を ORM フリーに保つため domain.Character とは分離する。
 type coreCharacterModel struct {
-	ID          uuid.UUID  `gorm:"primaryKey"`
+	ID          uuid.UUID `gorm:"primaryKey"`
 	Name        string
 	Description string
 	RaceID      uuid.UUID
@@ -24,7 +24,7 @@ type coreCharacterModel struct {
 	BirthPlace  string
 	HeightCm    *int16
 	WeightKg    *int16
-	BodyFat     *float32   `gorm:"column:body_fat_percentage"`
+	BodyFat     *float32 `gorm:"column:body_fat_percentage"`
 	SizeTop     *int16
 	SizeMiddle  *int16
 	SizeBottom  *int16
