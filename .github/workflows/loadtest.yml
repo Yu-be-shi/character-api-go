@@ -1,0 +1,22 @@
+name: Load test (k6)
+
+# 手動実行のみ。起動中の対象 API（STG/本番 up 中など）に対して負荷をかける。
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "対象 API のベース URL（例: http://<host>:8080）"
+        required: true
+
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run k6
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: loadtest/list.js
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          API_KEY: ${{ secrets.LOADTEST_API_KEY }}
