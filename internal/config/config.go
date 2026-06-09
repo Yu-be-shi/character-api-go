@@ -17,6 +17,9 @@ type Config struct {
 
 	// RedisAddr は冪等性キー用 Redis のアドレス（例: redis:6379）。空なら冪等性機能は無効。
 	RedisAddr string `env:"REDIS_ADDR" envDefault:""`
+
+	// RateLimitRPS は /api/v1 への IP あたりの秒間リクエスト上限。0 で無効（既定）。
+	RateLimitRPS float64 `env:"RATE_LIMIT_RPS" envDefault:"0"`
 }
 
 type DBConfig struct {

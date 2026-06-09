@@ -114,3 +114,4 @@ make dev
 | `LOG_LEVEL` | | info | ログレベル |
 | `CORS_ORIGINS` | | http://localhost:3000 | CORS 許可オリジン（カンマ区切り） |
 | `REDIS_ADDR` | | （空＝無効） | 冪等性キー用 Redis のアドレス（例 `character-api-redis:6379`）。空なら冪等性機能を無効化 |
+| `RATE_LIMIT_RPS` | | 0（無効） | `/api/v1` の IP あたり秒間リクエスト上限（無料・インメモリ）。0 で無効 |

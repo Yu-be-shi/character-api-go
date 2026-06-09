@@ -57,4 +57,3 @@ func normalizeName(name string) (string, error) {
 	}
 	return n, nil
 }
-
