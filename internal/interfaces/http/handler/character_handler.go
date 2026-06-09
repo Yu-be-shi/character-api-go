@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -251,6 +252,9 @@ func mapCharErr(err error) error {
 	case errors.Is(err, racedomain.ErrNotFound):
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, "race not found")
 	default:
-		return err
+		// 未分類のエラー（DB 障害など）。詳細はサーバーログにのみ残し、
+		// クライアントには内部情報を漏らさない汎用 500 を返す。
+		slog.Error("unhandled character error", "error", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
 	}
 }
