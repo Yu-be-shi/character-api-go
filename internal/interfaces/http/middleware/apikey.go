@@ -7,8 +7,8 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// InternalAPIKeyHeader は内部サービス間認証に使うヘッダー名。
-const InternalAPIKeyHeader = "X-Internal-API-Key"
+// InternalAPIKeyHeader は内部サービス間認証に使う HTTP ヘッダー「名」（資格情報そのものではない）。
+const InternalAPIKeyHeader = "X-Internal-API-Key" // #nosec G101 -- ヘッダ名であり秘密ではない
 
 // InternalAPIKey は内部サービス（application 側）からのリクエストのみ許可するミドルウェア。
 // 環境変数 INTERNAL_API_KEY と照合する。ブラウザからの直接アクセスはここで弾かれる。
