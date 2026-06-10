@@ -110,8 +110,8 @@ func (r *CharacterRepository) List(ctx context.Context, p domain.ListParams) ([]
 	}
 	rows, err := r.q.ListCharacters(ctx, sqlc.ListCharactersParams{
 		Ids: p.IDs, // nil なら $1 IS NULL で全件
-		Off: int32(p.Offset),
-		Lim: int32(p.Limit), // 0 なら NULLIF で LIMIT 無し
+		Off: int64(p.Offset),
+		Lim: int64(p.Limit), // 0 なら NULLIF で LIMIT 無し
 	})
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list characters: %w", err)

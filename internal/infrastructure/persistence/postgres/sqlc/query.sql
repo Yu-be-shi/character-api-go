@@ -29,8 +29,8 @@ LEFT JOIN races r ON r.id = c.race_id
 WHERE c.deleted_at IS NULL
   AND (sqlc.narg(ids)::uuid[] IS NULL OR c.id = ANY(sqlc.narg(ids)::uuid[]))
 ORDER BY c.created_at ASC
-LIMIT NULLIF(sqlc.arg(lim)::int, 0)
-OFFSET sqlc.arg(off)::int;
+LIMIT NULLIF(sqlc.arg(lim)::bigint, 0)
+OFFSET sqlc.arg(off)::bigint;
 
 -- name: CountCharacters :one
 SELECT COUNT(*) FROM core_characters

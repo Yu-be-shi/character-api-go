@@ -183,14 +183,14 @@ LEFT JOIN races r ON r.id = c.race_id
 WHERE c.deleted_at IS NULL
   AND ($1::uuid[] IS NULL OR c.id = ANY($1::uuid[]))
 ORDER BY c.created_at ASC
-LIMIT NULLIF($3::int, 0)
-OFFSET $2::int
+LIMIT NULLIF($3::bigint, 0)
+OFFSET $2::bigint
 `
 
 type ListCharactersParams struct {
 	Ids []uuid.UUID
-	Off int32
-	Lim int32
+	Off int64
+	Lim int64
 }
 
 type ListCharactersRow struct {
