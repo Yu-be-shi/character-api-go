@@ -1,0 +1,603 @@
+basePath: /
+definitions:
+  dto.CharacterListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.CharacterResponse'
+        type: array
+      total:
+        type: integer
+    type: object
+  dto.CharacterResponse:
+    properties:
+      birthDate:
+        type: string
+      birthPlace:
+        type: string
+      bodyFatPercentage:
+        type: number
+      createdAt:
+        type: string
+      description:
+        type: string
+      gender:
+        type: string
+      heightCm:
+        type: integer
+      id:
+        type: string
+      name:
+        type: string
+      race:
+        type: string
+      raceId:
+        type: string
+      sizeBottom:
+        type: integer
+      sizeMiddle:
+        type: integer
+      sizeTop:
+        type: integer
+      updatedAt:
+        type: string
+      version:
+        description: 楽観ロック用。更新時に If-Match で送り返す
+        type: integer
+      weightKg:
+        type: integer
+    type: object
+  dto.CreateCharacterRequest:
+    properties:
+      birthDate:
+        type: string
+      birthPlace:
+        maxLength: 150
+        type: string
+      bodyFatPercentage:
+        maximum: 100
+        minimum: 0
+        type: number
+      description:
+        maxLength: 5000
+        type: string
+      gender:
+        type: string
+      heightCm:
+        minimum: 1
+        type: integer
+      name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      raceId:
+        type: string
+      sizeBottom:
+        minimum: 1
+        type: integer
+      sizeMiddle:
+        minimum: 1
+        type: integer
+      sizeTop:
+        minimum: 1
+        type: integer
+      weightKg:
+        minimum: 1
+        type: integer
+    required:
+    - gender
+    - name
+    - raceId
+    type: object
+  dto.CreateRaceRequest:
+    properties:
+      name:
+        maxLength: 50
+        minLength: 1
+        type: string
+    required:
+    - name
+    type: object
+  dto.ErrorResponse:
+    properties:
+      details:
+        additionalProperties: {}
+        type: object
+      message:
+        type: string
+    type: object
+  dto.RaceResponse:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  dto.UpdateCharacterRequest:
+    properties:
+      birthDate:
+        type: string
+      birthPlace:
+        maxLength: 150
+        type: string
+      bodyFatPercentage:
+        maximum: 100
+        minimum: 0
+        type: number
+      description:
+        maxLength: 5000
+        type: string
+      gender:
+        type: string
+      heightCm:
+        minimum: 1
+        type: integer
+      name:
+        maxLength: 100
+        minLength: 1
+        type: string
+      raceId:
+        type: string
+      sizeBottom:
+        minimum: 1
+        type: integer
+      sizeMiddle:
+        minimum: 1
+        type: integer
+      sizeTop:
+        minimum: 1
+        type: integer
+      weightKg:
+        minimum: 1
+        type: integer
+    type: object
+  dto.UpdateRaceRequest:
+    properties:
+      name:
+        maxLength: 50
+        minLength: 1
+        type: string
+    required:
+    - name
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: キャラクター管理 REST API
+  title: Character API
+  version: "1.0"
+paths:
+  /api/v1/characters:
+    get:
+      description: ?ids=<uuid,...> でバッチ取得、?limit= / ?offset= でページング
+      parameters:
+      - description: カンマ区切りの UUID（指定時はその ID のみ返す）
+        in: query
+        name: ids
+        type: string
+      - description: 最大件数（1..500）
+        in: query
+        name: limit
+        type: integer
+      - description: オフセット
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.CharacterListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: キャラクター一覧取得
+      tags:
+      - characters
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: キャラクター作成リクエスト
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateCharacterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dto.CharacterResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: キャラクター作成
+      tags:
+      - characters
+  /api/v1/characters/{id}:
+    delete:
+      parameters:
+      - description: キャラクターID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: キャラクター削除
+      tags:
+      - characters
+    get:
+      parameters:
+      - description: キャラクターID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.CharacterResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: キャラクター取得
+      tags:
+      - characters
+    patch:
+      consumes:
+      - application/json
+      description: PATCH は部分更新。送った項目だけ変更し、省略した項目は据え置く（クリアは PUT を使う）。
+      parameters:
+      - description: キャラクターID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: '楽観ロック: 期待バージョン（GET の ETag 値）。不一致なら 412'
+        in: header
+        name: If-Match
+        type: string
+      - description: キャラクター部分更新リクエスト
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateCharacterRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.CharacterResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "412":
+          description: Precondition Failed
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: キャラクター更新（部分更新）
+      tags:
+      - characters
+    put:
+      consumes:
+      - application/json
+      description: PUT は全置換。送らなかった任意項目は NULL になる（値のクリアはこちらで行う）。
+      parameters:
+      - description: キャラクターID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: '楽観ロック: 期待バージョン（GET の ETag 値）。不一致なら 412'
+        in: header
+        name: If-Match
+        type: string
+      - description: キャラクター全置換リクエスト
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateCharacterRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.CharacterResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "412":
+          description: Precondition Failed
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: キャラクター更新（全置換）
+      tags:
+      - characters
+  /api/v1/races:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/dto.RaceResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: 種族一覧取得
+      tags:
+      - races
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 種族作成リクエスト
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateRaceRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dto.RaceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: 種族作成
+      tags:
+      - races
+  /api/v1/races/{id}:
+    delete:
+      parameters:
+      - description: 種族ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: 種族削除
+      tags:
+      - races
+    get:
+      parameters:
+      - description: 種族ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.RaceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: 種族取得
+      tags:
+      - races
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 種族ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 種族更新リクエスト
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateRaceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.RaceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: 種族更新
+      tags:
+      - races
+  /healthz:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Liveness（プロセス生存）。依存に触れない。
+      tags:
+      - health
+  /readyz:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Readiness（DB 接続確認込み）
+      tags:
+      - health
+securityDefinitions:
+  InternalAPIKey:
+    description: 内部サービス間認証キー
+    in: header
+    name: X-Internal-API-Key
+    type: apiKey
+swagger: "2.0"

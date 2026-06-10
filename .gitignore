@@ -3,4 +3,5 @@ bin/
 *.test
 coverage.out
 .env
-docs/
+# docs/（swagger 生成物）は router.go が import するパッケージのためコミットする
+# （生成コードもリポジトリに含める方針。CI の swagger ドリフト検査で同期を担保）。
