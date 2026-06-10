@@ -1,0 +1,3 @@
+[submodule "third_party/character-db"]
+	path = third_party/character-db
+	url = https://github.com/Yu-be-shi/character-db.git

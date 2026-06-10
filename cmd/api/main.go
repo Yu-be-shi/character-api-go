@@ -25,7 +25,7 @@ import (
 
 	"github.com/yu-be-shi/character-api/internal/config"
 	"github.com/yu-be-shi/character-api/internal/infrastructure/idempotency"
-	gormrepo "github.com/yu-be-shi/character-api/internal/infrastructure/persistence/gorm"
+	pgrepo "github.com/yu-be-shi/character-api/internal/infrastructure/persistence/postgres"
 	httpiface "github.com/yu-be-shi/character-api/internal/interfaces/http"
 	charUsecase "github.com/yu-be-shi/character-api/internal/usecase/character"
 	raceUsecase "github.com/yu-be-shi/character-api/internal/usecase/race"
@@ -48,20 +48,17 @@ func run() error {
 	}
 	setupLogger(cfg.LogLevel)
 
-	db, err := gormrepo.Open(cfg.DB)
+	pool, err := pgrepo.Open(context.Background(), cfg.DB)
 	if err != nil {
 		return err
 	}
+	defer pool.Close()
 
-	// /readyz 用の DB ping。sql.DB.PingContext で接続可否を確認する。
-	sqlDB, err := db.DB()
-	if err != nil {
-		return err
-	}
-	pingDB := func(ctx context.Context) error { return sqlDB.PingContext(ctx) }
+	// /readyz 用の DB ping。pgxpool.Ping で接続可否を確認する。
+	pingDB := pool.Ping
 
-	raceRepo := gormrepo.NewRaceRepository(db)
-	charRepo := gormrepo.NewCharacterRepository(db)
+	raceRepo := pgrepo.NewRaceRepository(pool)
+	charRepo := pgrepo.NewCharacterRepository(pool)
 
 	raceSvc := raceUsecase.NewService(raceRepo)
 	charSvc := charUsecase.NewService(charRepo, nil)

@@ -14,7 +14,7 @@
 | 層 | 技術 |
 |---|---|
 | Web フレームワーク | Go + Echo v4 |
-| ORM | GORM |
+| DB アクセス | sqlc（SQL からの型安全コード生成）+ pgx/v5 |
 | DB | PostgreSQL（`character-db`） |
 | マイグレーション | **持たない**（スキーマは `character-db` の Atlas が管理） |
 
@@ -25,6 +25,28 @@
 ```
 interfaces/http → usecase → domain ← infrastructure/persistence
 ```
+
+### DB アクセス（sqlc）とスキーマ依存
+
+永続化層は **sqlc**（`internal/infrastructure/persistence/postgres`）。SQL を書くと型安全な Go が
+生成され、`domain.Repository` を実装する。ORM のリフレクションに頼らず、発行 SQL が明示的。
+
+- **書き込みの不変条件は DB 側に集約**：楽観ロック（version 検査＋ +1）と論理削除は
+  `character-db` の DB 関数 `update_character` / `soft_delete_character` を呼ぶだけ。
+  関数は競合を SQLSTATE `CH412`、不在/削除済みを `CH404` で返し、`convert.go` が
+  ドメインエラー（`ErrVersionConflict` / `ErrNotFound` 等）へ変換する。
+- **スキーマの正は別リポジトリ**：`character-db` を **git submodule**（`third_party/character-db`）で
+  特定コミットに固定し、sqlc はそこの `schema.sql` と `views/10_*.sql` から型を生成する。
+  これによりローカルの並び順や起動中 DB に依存しない、宣言された純粋な依存になる。
+
+```bash
+git submodule update --init                 # 初回・clone 後
+git -C third_party/character-db checkout <sha> && git add third_party/character-db  # スキーマ追従（ピン更新）
+make sqlc                                    # 生成（docker の sqlc/sqlc。Go へのツール導入不要）
+```
+
+生成物（`internal/.../postgres/sqlc/*.go`）はコミットする。CI はビルド時に submodule 不要
+（生成済みコードを使う）。submodule が要るのは `make sqlc` の再生成と統合テストのみ。
 
 ### エラーハンドリング
 
@@ -45,7 +67,11 @@ go test ./internal/usecase/...   # ユースケースのみ
 - **interfaces/http 層**：`httptest` で実ルーター（`httpiface.New`）を起動し、APIキー認証（401）・
   パラメータ検証（400）・エラーマッピング（404/422）・正常系（201）をエンドツーエンドに検証
   （`internal/interfaces/http/router_test.go`）。
-- インメモリ fake を使うため、テスト実行に PostgreSQL は不要。
+- インメモリ fake を使うため、通常のテスト実行に PostgreSQL は不要。
+- **永続化層の統合テスト**（`-tags=integration`）：実 PostgreSQL に対し、submodule の実スキーマ＋
+  DB 関数を適用して version 競合（CH412）・論理削除（CH404）・FK→ErrInUse・NUMERIC 往復・
+  updated_at トリガーを検証する。`git submodule update --init` 済みであることと `TEST_DB_DSN`
+  （無ければ `DB_DSN`）が前提。例: `go test -tags=integration ./internal/infrastructure/persistence/postgres/...`
 
 ## 起動方法
 
