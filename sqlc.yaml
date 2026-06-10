@@ -1,0 +1,23 @@
+# sqlc 設定。スキーマの正は別リポジトリ character-db（third_party/ に git submodule で固定）。
+# この API はマイグレーションを持たず、submodule のピンを上げることでスキーマ追従する。
+#   生成: make sqlc  （docker の sqlc/sqlc を使うので Go へのツール導入は不要）
+version: "2"
+sql:
+  - engine: postgresql
+    # テーブル/ENUM は schema.sql、書き込み不変条件の関数は views/10_*.sql から catalog を構築する。
+    schema:
+      - third_party/character-db/schema.sql
+      - third_party/character-db/views/10_character_write_functions.sql
+    queries: internal/infrastructure/persistence/postgres/sqlc/query.sql
+    gen:
+      go:
+        package: sqlc
+        out: internal/infrastructure/persistence/postgres/sqlc
+        sql_package: pgx/v5
+        emit_json_tags: false
+        emit_interface: false
+        emit_empty_slices: true
+        # uuid を google/uuid.UUID に直接マップし、pgtype.UUID 変換を不要にする。
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"

@@ -30,6 +30,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true # third_party/character-db（sqlc 生成・統合テストのスキーマ源）
 
       - uses: actions/setup-go@v5
         with:
@@ -48,11 +50,12 @@ jobs:
           DB_DSN: "host=localhost user=app password=password dbname=testdb port=5432 sslmode=disable TimeZone=UTC"
           INTERNAL_API_KEY: test-key-for-ci
 
-      # リポジトリ層の実 DB 統合テスト（version 条件付き UPDATE・FK→422・論理削除・updated_at トリガー）。
+      # リポジトリ層の実 DB 統合テスト（version 競合 CH412・論理削除 CH404・FK→ErrInUse・updated_at トリガー）。
+      # submodule の実スキーマ＋ DB 関数を適用して本番同等で検証する。
       - name: integration test (repository, real DB)
-        run: go test -race -tags=integration ./internal/infrastructure/persistence/gorm/...
+        run: go test -race -tags=integration ./internal/infrastructure/persistence/postgres/...
         env:
-          TEST_DB_DSN: "host=localhost user=app password=password dbname=testdb port=5432 sslmode=disable TimeZone=UTC"
+          TEST_DB_DSN: "postgres://app:password@localhost:5432/testdb?sslmode=disable"
 
       # OpenAPI(Swagger) がコードと同期しているか（再生成して差分が無いこと）を検証する。
       - name: swagger up-to-date (OpenAPI drift)
@@ -60,6 +63,12 @@ jobs:
           go install github.com/swaggo/swag/cmd/swag@v1.16.4
           "$(go env GOPATH)/bin/swag" init -g cmd/api/main.go -o docs --parseInternal
           git diff --exit-code docs/ || { echo "::error::swagger が古い。'make generate' を実行してコミットしてください"; exit 1; }
+
+      # sqlc 生成物がスキーマ/クエリと同期しているか（再生成して差分が無いこと）を検証する。
+      - name: sqlc up-to-date (sqlc drift)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src sqlc/sqlc:1.31.1 generate
+          git diff --exit-code internal/infrastructure/persistence/postgres/sqlc/ || { echo "::error::sqlc が古い。'make sqlc' を実行してコミットしてください"; exit 1; }
 
   # 依存の既知脆弱性（govulncheck）と秘密混入（gitleaks）の検査。
   security:
