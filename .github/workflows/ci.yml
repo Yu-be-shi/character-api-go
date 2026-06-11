@@ -32,7 +32,7 @@ jobs:
       # スキーマ（schema.sql / migrations / views / seeds）は自リポジトリが所有する。
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -77,7 +77,7 @@ jobs:
         with:
           fetch-depth: 0 # gitleaks は全履歴を走査する
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           # 最新 stable で走らせ、標準ライブラリのパッチ済みバージョンで検査する
           # （stdlib の脆弱性は常に「最新で修正済み」なので gate が陳腐化しない）。
