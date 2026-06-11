@@ -40,21 +40,22 @@ func (r *fakeCharRepo) Save(_ context.Context, c *domain.Character) error {
 	return nil
 }
 
-func (r *fakeCharRepo) Update(_ context.Context, c *domain.Character, expectedVersion *int64) error {
+func (r *fakeCharRepo) Update(_ context.Context, c *domain.Character, expectedVersion *int64) (*domain.Character, error) {
 	if r.updateErr != nil {
-		return r.updateErr
+		return nil, r.updateErr
 	}
 	cur, ok := r.store[c.ID]
 	if !ok {
-		return domain.ErrNotFound
+		return nil, domain.ErrNotFound
 	}
 	if expectedVersion != nil && cur.Version != *expectedVersion {
-		return domain.ErrVersionConflict
+		return nil, domain.ErrVersionConflict
 	}
 	cp := *c
-	cp.Version = cur.Version + 1 // DB トリガー相当でバージョンを増やす
+	cp.Version = cur.Version + 1 // DB 関数（update_character）相当でバージョンを増やす
 	r.store[c.ID] = &cp
-	return nil
+	out := cp
+	return &out, nil
 }
 
 func (r *fakeCharRepo) FindByID(_ context.Context, id uuid.UUID) (*domain.Character, error) {
@@ -207,10 +208,8 @@ func TestService_Get_NotFound(t *testing.T) {
 
 func TestService_Update_PartialFields(t *testing.T) {
 	t0 := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
-	t1 := t0.Add(time.Hour)
 	charRepo := newFakeCharRepo()
-	clock := &steppingClock{times: []time.Time{t0, t1}}
-	svc := newSvc(charRepo, clock.Now)
+	svc := newSvc(charRepo, fixedClock(t0))
 
 	c, err := svc.Create(context.Background(), usecase.CreateInput{
 		Name:   "Alice",
@@ -225,9 +224,9 @@ func TestService_Update_PartialFields(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "Alicia", updated.Name)
-	assert.Equal(t, t1, updated.UpdatedAt)
-	assert.Equal(t, t0, updated.CreatedAt)
-	assert.Equal(t, c.Version+1, updated.Version) // 更新で版が +1 される
+	assert.Equal(t, t0, updated.CreatedAt)        // created_at は変わらない
+	assert.Equal(t, c.Version+1, updated.Version) // 更新で版が +1 される（DB 確定値）
+	// updated_at は DB トリガーが確定する値のため、fake では検証しない（統合テストで担保）。
 }
 
 func TestService_Update_VersionConflict(t *testing.T) {
@@ -330,17 +329,4 @@ func TestService_List_ReturnsItemsAndTotal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, cs, 2)
 	assert.Equal(t, int64(2), total)
-}
-
-type steppingClock struct {
-	times []time.Time
-	i     int
-}
-
-func (s *steppingClock) Now() time.Time {
-	t := s.times[s.i]
-	if s.i < len(s.times)-1 {
-		s.i++
-	}
-	return t
 }

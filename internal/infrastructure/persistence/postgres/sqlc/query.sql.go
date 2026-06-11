@@ -32,8 +32,8 @@ INSERT INTO core_characters (
     height_cm, weight_kg, body_fat_percentage, size_top, size_middle, size_bottom,
     version, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6::date, $7,
+    $1, $2, $3::text, $4, $5,
+    $6::date, $7::varchar,
     $8::smallint, $9::smallint,
     $10::numeric,
     $11::smallint, $12::smallint, $13::smallint,
@@ -63,6 +63,8 @@ type CreateCharacterParams struct {
 // character / race の SQL。書き込みの不変条件（楽観ロック・論理削除）は
 // character-db 側の DB 関数 update_character / soft_delete_character に集約済みで、
 // ここではそれを呼ぶだけ。読み取りは races を JOIN して race 名を展開する。
+// description / birth_place は「未設定」を NULL で表現する（空文字と NULL を混在させない。
+// 正規化は repo 層の pgTextOrNull が行う）。
 func (q *Queries) CreateCharacter(ctx context.Context, arg CreateCharacterParams) error {
 	_, err := q.db.Exec(ctx, createCharacter,
 		arg.ID,
@@ -182,7 +184,7 @@ FROM core_characters c
 LEFT JOIN races r ON r.id = c.race_id
 WHERE c.deleted_at IS NULL
   AND ($1::uuid[] IS NULL OR c.id = ANY($1::uuid[]))
-ORDER BY c.created_at ASC
+ORDER BY c.created_at ASC, c.id ASC
 LIMIT NULLIF($3::bigint, 0)
 OFFSET $2::bigint
 `
@@ -214,6 +216,7 @@ type ListCharactersRow struct {
 	RaceName          pgtype.Text
 }
 
+// id をタイブレークにして同時刻行でもページング順序を安定させる
 func (q *Queries) ListCharacters(ctx context.Context, arg ListCharactersParams) ([]ListCharactersRow, error) {
 	rows, err := q.db.Query(ctx, listCharacters, arg.Ids, arg.Off, arg.Lim)
 	if err != nil {
@@ -287,34 +290,36 @@ func (q *Queries) SoftDeleteCharacter(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-const updateCharacter = `-- name: UpdateCharacter :exec
-SELECT update_character(
+const updateCharacter = `-- name: UpdateCharacter :one
+SELECT u.id, u.name, u.description, u.race_id, u.gender, u.birth_date, u.birth_place, u.height_cm, u.weight_kg, u.body_fat_percentage, u.size_top, u.size_middle, u.size_bottom, u.version, u.created_at, u.updated_at, u.deleted_at, r.name AS race_name
+FROM update_character(
     $1,
     $2::bigint,
     $3,
-    $4,
+    $4::text,
     $5,
     $6,
     $7::date,
-    $8,
+    $8::varchar,
     $9::smallint,
     $10::smallint,
     $11::numeric,
     $12::smallint,
     $13::smallint,
     $14::smallint
-)
+) AS u
+LEFT JOIN races r ON r.id = u.race_id
 `
 
 type UpdateCharacterParams struct {
 	ID                uuid.UUID
 	ExpectedVersion   pgtype.Int8
 	Name              string
-	Description       string
+	Description       pgtype.Text
 	RaceID            uuid.UUID
 	Gender            GenderEnum
 	BirthDate         pgtype.Date
-	BirthPlace        string
+	BirthPlace        pgtype.Text
 	HeightCm          pgtype.Int2
 	WeightKg          pgtype.Int2
 	BodyFatPercentage pgtype.Numeric
@@ -323,11 +328,34 @@ type UpdateCharacterParams struct {
 	SizeBottom        pgtype.Int2
 }
 
+type UpdateCharacterRow struct {
+	ID                uuid.UUID
+	Name              string
+	Description       pgtype.Text
+	RaceID            uuid.UUID
+	Gender            GenderEnum
+	BirthDate         pgtype.Date
+	BirthPlace        pgtype.Text
+	HeightCm          pgtype.Int2
+	WeightKg          pgtype.Int2
+	BodyFatPercentage pgtype.Numeric
+	SizeTop           pgtype.Int2
+	SizeMiddle        pgtype.Int2
+	SizeBottom        pgtype.Int2
+	Version           int64
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	DeletedAt         pgtype.Timestamptz
+	RaceName          pgtype.Text
+}
+
 // 楽観ロック(version 検査+1)と soft-delete フィルタは関数内で行う。
 // expected_version が NULL なら version 検査をスキップ（強制更新）。
 // 競合時は SQLSTATE 'CH412'、不在/削除済みは 'CH404' を RAISE する。
-func (q *Queries) UpdateCharacter(ctx context.Context, arg UpdateCharacterParams) error {
-	_, err := q.db.Exec(ctx, updateCharacter,
+// 関数の RETURNING（更新後の行）をそのまま返し、呼び出し側の再 SELECT
+// （別トランザクションになることによる競合窓・余分な往復）を無くす。
+func (q *Queries) UpdateCharacter(ctx context.Context, arg UpdateCharacterParams) (UpdateCharacterRow, error) {
+	row := q.db.QueryRow(ctx, updateCharacter,
 		arg.ID,
 		arg.ExpectedVersion,
 		arg.Name,
@@ -343,7 +371,28 @@ func (q *Queries) UpdateCharacter(ctx context.Context, arg UpdateCharacterParams
 		arg.SizeMiddle,
 		arg.SizeBottom,
 	)
-	return err
+	var i UpdateCharacterRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.RaceID,
+		&i.Gender,
+		&i.BirthDate,
+		&i.BirthPlace,
+		&i.HeightCm,
+		&i.WeightKg,
+		&i.BodyFatPercentage,
+		&i.SizeTop,
+		&i.SizeMiddle,
+		&i.SizeBottom,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.RaceName,
+	)
+	return i, err
 }
 
 const updateRace = `-- name: UpdateRace :execrows

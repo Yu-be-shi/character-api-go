@@ -61,7 +61,7 @@ func run() error {
 	charRepo := pgrepo.NewCharacterRepository(pool)
 
 	raceSvc := raceUsecase.NewService(raceRepo)
-	charSvc := charUsecase.NewService(charRepo, nil)
+	charSvc := charUsecase.NewService(charRepo, time.Now)
 
 	// 冪等性キー用ストア（REDIS_ADDR 未設定なら無効）。
 	var idemStore idempotency.Store
@@ -75,6 +75,13 @@ func run() error {
 	}
 
 	e := httpiface.New(cfg, charSvc, raceSvc, pingDB, idemStore)
+
+	// Slowloris 等の低速クライアント対策（ヘッダ・ボディの読み取りと
+	// アイドル接続に上限を設ける）。
+	e.Server.ReadHeaderTimeout = 10 * time.Second
+	e.Server.ReadTimeout = 30 * time.Second
+	e.Server.WriteTimeout = 30 * time.Second
+	e.Server.IdleTimeout = 120 * time.Second
 
 	srvErr := make(chan error, 1)
 	go func() {

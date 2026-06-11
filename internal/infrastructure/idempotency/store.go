@@ -6,9 +6,14 @@ package idempotency
 import "context"
 
 // Result は冪等キーに紐づけて保存する完了レスポンス（再送時に再生する）。
+//   - BodyHash: リクエストボディの SHA-256。同一キーで異なるボディが来たことを
+//     検知するために保存する（黙って別リクエストの結果を再生しない）。
+//   - Header: 再生時に復元するレスポンスヘッダ（ETag / Content-Type 等）。
 type Result struct {
-	Status int    `json:"status"`
-	Body   []byte `json:"body"`
+	Status   int               `json:"status"`
+	Body     []byte            `json:"body"`
+	BodyHash string            `json:"body_hash"`
+	Header   map[string]string `json:"header,omitempty"`
 }
 
 // Store は冪等キーの予約・結果保存・解放を行う。

@@ -80,20 +80,32 @@ func (s *Service) List(ctx context.Context, p domain.ListParams) ([]*domain.Char
 	return items, total, nil
 }
 
+// ReplaceInput は PUT（全置換）の入力。フィールド構成は CreateInput と同一
+// （PUT は「作成時と同じ表現で丸ごと置き換える」セマンティクスのため）。
+type ReplaceInput = CreateInput
+
 // Replace は PUT（全置換）。送られなかった任意項目はクリアされる。
 // expectedVersion が非 nil なら楽観ロック（版不一致は ErrVersionConflict）。
-func (s *Service) Replace(ctx context.Context, id uuid.UUID, in CreateInput, expectedVersion *int64) (*domain.Character, error) {
+// nil（If-Match 省略）の場合も、読み取り時点の version を期待値として使い、
+// FindByID と Update の間に入った他者の更新を黙って上書きしない（lost update 防止）。
+// 返り値は repo.Update が返す永続化後の最新状態（version / updated_at は DB 確定値）。
+func (s *Service) Replace(ctx context.Context, id uuid.UUID, in ReplaceInput, expectedVersion *int64) (*domain.Character, error) {
 	c, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.Replace(domain.ReplaceFields(in), s.now()); err != nil {
+	if expectedVersion == nil {
+		v := c.Version
+		expectedVersion = &v
+	}
+	if err := c.Replace(domain.ReplaceFields(in)); err != nil {
 		return nil, err
 	}
-	if err := s.repo.Update(ctx, c, expectedVersion); err != nil {
+	updated, err := s.repo.Update(ctx, c, expectedVersion)
+	if err != nil {
 		return nil, fmt.Errorf("usecase replace character: %w", err)
 	}
-	return s.repo.FindByID(ctx, id)
+	return updated, nil
 }
 
 type UpdateInput struct {
@@ -102,18 +114,25 @@ type UpdateInput struct {
 
 // Update は PATCH（部分更新）。nil のフィールドは変更しない（クリアはできない＝全消しは PUT を使う）。
 // expectedVersion が非 nil なら楽観ロック（版不一致は ErrVersionConflict）。
+// nil（If-Match 省略）の場合も、読み取り時点の version を期待値として使い、
+// 「読んでマージして全置換」の間に入った他者の更新を黙って失わない（lost update 防止）。
 func (s *Service) Update(ctx context.Context, id uuid.UUID, in UpdateInput, expectedVersion *int64) (*domain.Character, error) {
 	c, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.Update(in.UpdateFields, s.now()); err != nil {
+	if expectedVersion == nil {
+		v := c.Version
+		expectedVersion = &v
+	}
+	if err := c.Update(in.UpdateFields); err != nil {
 		return nil, err
 	}
-	if err := s.repo.Update(ctx, c, expectedVersion); err != nil {
+	updated, err := s.repo.Update(ctx, c, expectedVersion)
+	if err != nil {
 		return nil, fmt.Errorf("usecase update character: %w", err)
 	}
-	return s.repo.FindByID(ctx, id)
+	return updated, nil
 }
 
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {

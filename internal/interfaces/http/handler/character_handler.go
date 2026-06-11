@@ -37,6 +37,10 @@ func (h *CharacterHandler) Register(g *echo.Group) {
 // maxListLimit は ?limit= で指定できる最大件数（無制限取得を防ぐ）。
 const maxListLimit = 500
 
+// defaultListLimit は ?limit= 省略時の件数。未指定で全件返すとデータ増加に伴い
+// 劣化するため、省略時も必ず上限を適用する（?ids= 指定時は ids の件数が上限）。
+const defaultListLimit = 100
+
 // List godoc
 // @Summary      キャラクター一覧取得
 // @Description  ?ids=<uuid,...> でバッチ取得、?limit= / ?offset= でページング
@@ -86,6 +90,10 @@ func parseListParams(c echo.Context) (chardomain.ListParams, error) {
 			return p, echo.NewHTTPError(http.StatusBadRequest, "limit must be 1..500")
 		}
 		p.Limit = n
+	} else if p.IDs == nil {
+		// ?ids= によるバッチ取得（件数は ids 自体が上限）以外は、limit 省略でも
+		// 全件取得にならないようデフォルトを適用する。
+		p.Limit = defaultListLimit
 	}
 	if raw := c.QueryParam("offset"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -309,15 +317,20 @@ func parseID(c echo.Context) (uuid.UUID, error) {
 }
 
 // parseIfMatch は If-Match ヘッダから期待バージョン（楽観ロック）を取り出す。
-// 省略 or "*" のときは nil（無条件更新＝後方互換）。`"3"` や `W/"3"` 形式を許容する。
+// 省略 or "*" のときは nil（無条件更新）。`"3"` 形式のみ受理する。
+// 弱い検証子（W/"3"）は RFC 9110 §13.1.1 のとおり If-Match の強い比較では
+// 決して一致しないため、412 を返す。
+// https://www.rfc-editor.org/rfc/rfc9110#name-if-match
 func parseIfMatch(c echo.Context) (*int64, error) {
 	raw := strings.TrimSpace(c.Request().Header.Get("If-Match"))
 	if raw == "" || raw == "*" {
 		return nil, nil
 	}
-	raw = strings.TrimPrefix(raw, "W/")
-	raw = strings.Trim(raw, `"`)
-	v, err := strconv.ParseInt(raw, 10, 64)
+	if strings.HasPrefix(raw, "W/") {
+		return nil, echo.NewHTTPError(http.StatusPreconditionFailed,
+			"weak entity-tag never matches If-Match (RFC 9110)")
+	}
+	v, err := strconv.ParseInt(strings.Trim(raw, `"`), 10, 64)
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid If-Match header")
 	}

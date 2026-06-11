@@ -105,6 +105,12 @@ func TestIntegration_SaveAndFind(t *testing.T) {
 	require.NotNil(t, got.BodyFat)
 	assert.InDelta(t, 12.5, *got.BodyFat, 0.001) // NUMERIC ⇄ float32 往復
 	assert.EqualValues(t, 1, got.Version)
+
+	// 空文字の任意テキスト項目は NULL に正規化されて保存される（'' と NULL を混在させない）。
+	var descIsNull bool
+	require.NoError(t, pool.QueryRow(context.Background(),
+		"SELECT description IS NULL FROM core_characters WHERE id = $1", c.ID).Scan(&descIsNull))
+	assert.True(t, descIsNull)
 }
 
 func TestIntegration_Save_FKViolation(t *testing.T) {
@@ -127,19 +133,19 @@ func TestIntegration_Update_VersionAndClear(t *testing.T) {
 	require.NoError(t, repo.Save(context.Background(), c))
 
 	// height をクリア（nil）し、正しい version で更新 → 成功・version +1・height NULL。
+	// Update は update_character の RETURNING（更新後の行）をそのまま返す。
 	c.HeightCm = nil
 	c.Name = "アリス改"
 	v1 := int64(1)
-	require.NoError(t, repo.Update(context.Background(), c, &v1))
-
-	got, err := repo.FindByID(context.Background(), c.ID)
+	updated, err := repo.Update(context.Background(), c, &v1)
 	require.NoError(t, err)
-	assert.Equal(t, "アリス改", got.Name)
-	assert.Nil(t, got.HeightCm)
-	assert.EqualValues(t, 2, got.Version)
+	assert.Equal(t, "アリス改", updated.Name)
+	assert.Nil(t, updated.HeightCm)
+	assert.EqualValues(t, 2, updated.Version)
+	assert.Equal(t, "人間", updated.RaceName) // RETURNING 行にも race 名が JOIN される
 
 	// 古い version(1) で再更新 → 競合（CH412 → ErrVersionConflict）。
-	err = repo.Update(context.Background(), c, &v1)
+	_, err = repo.Update(context.Background(), c, &v1)
 	assert.ErrorIs(t, err, chardomain.ErrVersionConflict)
 }
 
@@ -149,7 +155,7 @@ func TestIntegration_Update_NotFound(t *testing.T) {
 	raceID := seedRaceRow(t, pool)
 
 	c := newChar(t, raceID) // 未保存（存在しない）
-	err := repo.Update(context.Background(), c, nil)
+	_, err := repo.Update(context.Background(), c, nil)
 	assert.ErrorIs(t, err, chardomain.ErrNotFound)
 }
 

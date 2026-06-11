@@ -2,7 +2,11 @@ package httpiface
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
+	"reflect"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
@@ -24,17 +28,40 @@ type echoValidator struct {
 	v *validator.Validate
 }
 
+// Validate は検証エラーを「フィールド名（json タグ）→ 失敗した検証ルール」の
+// 構造化された詳細に変換して返す。validator の生メッセージは Go の構造体名
+// （`CreateCharacterRequest.Name` 等）を含み内部実装が漏れるため、そのまま返さない。
 func (ev *echoValidator) Validate(i any) error {
-	if err := ev.v.Struct(i); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	err := ev.v.Struct(i)
+	if err == nil {
+		return nil
 	}
-	return nil
+	var verrs validator.ValidationErrors
+	if errors.As(err, &verrs) {
+		details := make(map[string]string, len(verrs))
+		for _, fe := range verrs {
+			details[fe.Field()] = fmt.Sprintf("failed on '%s' validation", fe.Tag())
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, map[string]any{
+			"message": "validation failed",
+			"details": details,
+		})
+	}
+	return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 }
 
 // newValidator は許可 gender をドメイン（chardomain.AllGenders）から取る
 // カスタムバリデーション "gender" を登録する。DTO 側の oneof 文字列重複を排除する。
+// エラー詳細のフィールド名は Go のフィールド名ではなく json タグ名を使う。
 func newValidator() *validator.Validate {
 	v := validator.New()
+	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
+		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
+		if name == "" || name == "-" {
+			return fld.Name
+		}
+		return name
+	})
 	_ = v.RegisterValidation("gender", func(fl validator.FieldLevel) bool {
 		return chardomain.Gender(fl.Field().String()).Valid()
 	})
@@ -53,10 +80,13 @@ func New(cfg config.Config, charSvc *charUsecase.Service, raceSvc *raceUsecase.S
 	e.Use(middleware.RequestID())
 	e.Use(middleware.Logger())
 	e.Use(middleware.BodyLimit("1M")) // 巨大リクエストボディを拒否（413）
+	// CORS はデバッグ用途（Swagger UI 等）の最小許可。X-Internal-API-Key は
+	// サーバー間共有シークレットでありブラウザに渡してはならないため、
+	// 意図的に AllowHeaders へ含めない（ブラウザから鍵付きで呼ぶ構成を公認しない）。
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: cfg.CORSOrigins,
-		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
-		AllowHeaders: []string{echo.HeaderContentType, apimw.InternalAPIKeyHeader, apimw.IdempotencyKeyHeader, "If-Match"},
+		AllowMethods: []string{http.MethodGet, http.MethodOptions},
+		AllowHeaders: []string{echo.HeaderContentType},
 	}))
 
 	e.GET("/healthz", handler.Health)

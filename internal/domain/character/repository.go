@@ -17,9 +17,10 @@ type ListParams struct {
 
 type Repository interface {
 	Save(ctx context.Context, c *Character) error
-	// Update は c の状態を永続化する。expectedVersion が非 nil のときは
-	// 楽観ロックとして version 一致を条件にし、不一致なら ErrVersionConflict を返す。
-	Update(ctx context.Context, c *Character, expectedVersion *int64) error
+	// Update は c の状態を永続化し、永続化後の最新状態（version +1・updated_at は
+	// DB 側で確定した値）を返す。expectedVersion が非 nil のときは楽観ロックとして
+	// version 一致を条件にし、不一致なら ErrVersionConflict を返す。
+	Update(ctx context.Context, c *Character, expectedVersion *int64) (*Character, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*Character, error)
 	List(ctx context.Context, p ListParams) ([]*Character, error)
 	// Count は List と同じ絞り込み条件（IDs・論理削除）での総件数を返す。
