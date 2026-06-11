@@ -1,7 +1,7 @@
 # character-api
 
-[![CI](https://github.com/Yu-be-shi/character-api-go/actions/workflows/ci.yml/badge.svg)](https://github.com/Yu-be-shi/character-api-go/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/Yu-be-shi/character-api-go/actions/workflows/codeql.yml/badge.svg)](https://github.com/Yu-be-shi/character-api-go/actions/workflows/codeql.yml)
+[![CI](https://github.com/Yu-be-shi/ys-character-api/actions/workflows/ci.yml/badge.svg)](https://github.com/Yu-be-shi/ys-character-api/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Yu-be-shi/ys-character-api/actions/workflows/codeql.yml/badge.svg)](https://github.com/Yu-be-shi/ys-character-api/actions/workflows/codeql.yml)
 
 キャラクターデータの CRUD を行うコアAPI。
 ユーザー情報に一切依存しない、ピュアなキャラクターデータ管理サービス。
@@ -16,7 +16,7 @@
 | Web フレームワーク | Go + Echo v4 |
 | DB アクセス | sqlc（SQL からの型安全コード生成）+ pgx/v5 |
 | DB | PostgreSQL（`character-db`） |
-| マイグレーション | **持たない**（スキーマは `character-db` の Atlas が管理） |
+| スキーマ/マイグレーション | **このリポジトリが所有**（Atlas + 冪等 SQL。`character-db-migrate` が適用） |
 
 ## アーキテクチャ
 
@@ -32,22 +32,18 @@ interfaces/http → usecase → domain ← infrastructure/persistence
 生成され、`domain.Repository` を実装する。ORM のリフレクションに頼らず、発行 SQL が明示的。
 
 - **書き込みの不変条件は DB 側に集約**：楽観ロック（version 検査＋ +1）と論理削除は
-  `character-db` の DB 関数 `update_character` / `soft_delete_character` を呼ぶだけ。
+  DB 関数 `update_character` / `soft_delete_character`（`views/10_*.sql` が定義）を呼ぶだけ。
   関数は競合を SQLSTATE `CH412`、不在/削除済みを `CH404` で返し、`convert.go` が
   ドメインエラー（`ErrVersionConflict` / `ErrNotFound` 等）へ変換する。
-- **スキーマの正は別リポジトリ**：`character-db` の必要なファイルだけを
-  `third_party/character-db/`（`schema.sql` と `views/*.sql`）に **vendoring（通常ファイルとして
-  コミット）** し、sqlc はそこから型を生成する。これによりローカルの並び順や起動中 DB に依存しない、
-  宣言された純粋な依存になる。取り込み元コミットは `third_party/character-db/SOURCE_SHA` に記録する。
-  以前は git submodule だったが、API が使うのは数ファイルだけでリポジトリ全体の展開が無駄だったため変更した。
+- **スキーマの正はこのリポジトリ**：`schema.sql` / `migrations/` / `views/` / `seeds/` を所有し、
+  sqlc はローカルの `schema.sql` / `views/10_*.sql` から型を生成する。
 
 ```bash
-make sqlc   # 生成（docker の sqlc/sqlc。Go へのツール導入不要）。clone 直後そのまま動く（submodule 不要）
+make sqlc   # 生成（docker の sqlc/sqlc。Go へのツール導入不要）
 ```
 
-生成物（`internal/.../postgres/sqlc/*.go`）はコミットする。スキーマ追従は手作業ではなく
-`.github/workflows/schema-sync.yml` が `character-db` の更新通知を受けて vendored ファイルを
-上書きコピー＋ `make sqlc` 再生成＋追従 PR を自動で行う（手動で回すときは `workflow_dispatch`）。
+生成物（`internal/.../postgres/sqlc/*.go`）はコミットする。スキーマを変えたら
+`make migration` / `make hash` / `make sqlc` を実行し、生成差分も同じ PR でコミットする。
 
 ### エラーハンドリング
 
@@ -69,7 +65,7 @@ go test ./internal/usecase/...   # ユースケースのみ
   パラメータ検証（400）・エラーマッピング（404/422）・正常系（201）をエンドツーエンドに検証
   （`internal/interfaces/http/router_test.go`）。
 - インメモリ fake を使うため、通常のテスト実行に PostgreSQL は不要。
-- **永続化層の統合テスト**（`-tags=integration`）：実 PostgreSQL に対し、vendoring した実スキーマ＋
+- **永続化層の統合テスト**（`-tags=integration`）：実 PostgreSQL に対し、このリポジトリの実スキーマ＋
   DB 関数を適用して version 競合（CH412）・論理削除（CH404）・FK→ErrInUse・NUMERIC 往復・
   updated_at トリガーを検証する。`TEST_DB_DSN`（無ければ `DB_DSN`）が前提。
   例: `go test -tags=integration ./internal/infrastructure/persistence/postgres/...`
@@ -77,22 +73,23 @@ go test ./internal/usecase/...   # ユースケースのみ
 ## 起動方法
 
 ```bash
-# ローカル開発（推奨）: API 専用インフラの docker-compose から起動する。
-# 事前に character-db-infra を起動して character-db-net / DB を用意しておくこと。
-cd ../character-api-go-infra && docker compose up --build -d
+# ローカル開発（推奨）: 基盤スタック ys-infrastructure の docker-compose が
+# character-db-net / DB / migrate / この API をまとめて起動する。
+cd ../../ys-infrastructure && docker compose up --build -d
 
 # Air によるホットリロード単体開発
 make dev
 ```
 
-## マイグレーション
+## スキーマ / マイグレーション
 
-この API はマイグレーションを **持たない**。スキーマ（テーブル・ビュー・ENUM）は
-`character-db` リポジトリの宣言的定義（`schema.sql`）と Atlas マイグレーションが
-唯一の正であり、適用は `character-db-migrate` サービスが行う。
+このリポジトリがキャラクタースキーマの **唯一の正**（`schema.sql` / `migrations/`(Atlas) /
+`views/` / `seeds/`）を所有する。適用は `Dockerfile.migrate` から作る `character-db-migrate`
+サービスが行う（atlas apply → views → seeds）。アプリ起動時には migrate しない。
 
-スキーマを変更したいときは `character-db/` 側で `make migration` / `make hash` を実行する。
-カラムの削除・リネームは、この API を含む全 API が対応済みになってから行うこと。
+スキーマ変更は `make migration name=<説明>` / `make hash` /（必要なら）`make sqlc` を実行する。
+カラムの削除・リネームは読み手（消費者）の対応を確認してから行うこと。sqlc はローカルの
+`schema.sql` / `views/10_*.sql` から型生成する。
 
 ## サービス間認証
 
@@ -136,7 +133,7 @@ make dev
 - `POST /characters` は `confirmed_at = NULL`（pending）で作成する。pending は一覧/取得/更新/削除に**出ない**。
 - application が所有リンク（`UserCharacter`）を書いた後、`POST /characters/{id}/confirm` で確定し可視化する。
 - 確定が最後なので「**可視なキャラは必ず所有者を持つ**」が保証される。失敗しても pending が残るだけで可視データに穴は空かない。
-- 確定されなかった pending は、内蔵スイーパーが `gc_unconfirmed_characters`（character-db 側関数）で物理回収する（`RESERVATION_TTL` / `RESERVATION_SWEEP_INTERVAL`）。**消費者は origin を削除しない**＝管轄外削除を避ける。
+- 確定されなかった pending は、内蔵スイーパーが `gc_unconfirmed_characters`（DB 関数）で物理回収する（`RESERVATION_TTL` / `RESERVATION_SWEEP_INTERVAL`）。**消費者は origin を削除しない**＝管轄外削除を避ける。
 - 作成の二重実行は `core_characters.creation_token`（`Idempotency-Key` 由来）の一意制約で永続的に防ぐ（Redis 非依存）。再送は既存行を返す。
 
 ## 並行制御（楽観ロック）と冪等性
@@ -147,7 +144,7 @@ make dev
     不一致（別の更新が先に入った）なら **412 Precondition Failed**。
   - **`If-Match` 省略時も無条件上書きにはならない**：読み取り時点の version を期待値として
     使うため、read-modify-write の間に他者の更新が入れば 412 が返り得る（lost update 防止）。
-  - 版検査と +1 は DB 関数 `update_character`（character-db 側）が行う（複数 API で手順がズレない）。
+  - 版検査と +1 は DB 関数 `update_character`（`views/10_*.sql`）が行う（複数 API で手順がズレない）。
 - **冪等性キー**：`/api/v1` 配下の **すべての POST**（characters / races）で
   `Idempotency-Key`（200 文字以内）を送ると、同一キー・同一ボディの再送は保存済みレスポンスを
   再生する（`Idempotent-Replayed: true`。`ETag` / `Location` / `Content-Type` も復元）。
