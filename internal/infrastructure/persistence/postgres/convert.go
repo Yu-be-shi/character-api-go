@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -30,6 +31,23 @@ func pgCode(err error) (string, bool) {
 // --- ドメイン型 ⇄ pgtype 変換 ---
 
 func pgText(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
+
+// pgTextOrNull は空文字を NULL に正規化する（任意テキスト項目用）。
+// 複数 API が共有する DB で「未設定」の表現を NULL に統一し、空文字と NULL を混在させない。
+func pgTextOrNull(s string) pgtype.Text {
+	if s == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: s, Valid: true}
+}
+
+// pgTextPtr は *string を NULL 可能テキストへ（nil → NULL）。creation_token（作成の冪等トークン）用。
+func pgTextPtr(p *string) pgtype.Text {
+	if p == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *p, Valid: true}
+}
 
 func textString(t pgtype.Text) string {
 	if t.Valid {
@@ -80,15 +98,16 @@ func pgTimestamptz(t time.Time) pgtype.Timestamptz {
 }
 
 // pgNumeric は *float32 を NUMERIC へ。nil は NULL。文字列経由で変換する。
-func pgNumeric(p *float32) pgtype.Numeric {
+// 変換に失敗した場合（NaN/Inf 等）はエラーを返す。値を黙って NULL に落とさない。
+func pgNumeric(p *float32) (pgtype.Numeric, error) {
 	var n pgtype.Numeric
 	if p == nil {
-		return n // Valid=false → NULL
+		return n, nil // Valid=false → NULL
 	}
 	if err := n.Scan(strconv.FormatFloat(float64(*p), 'f', -1, 32)); err != nil {
-		return pgtype.Numeric{}
+		return pgtype.Numeric{}, fmt.Errorf("convert %v to numeric: %w", *p, err)
 	}
-	return n
+	return n, nil
 }
 
 func numericPtr(n pgtype.Numeric) *float32 {

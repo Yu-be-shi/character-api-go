@@ -61,7 +61,7 @@ func run() error {
 	charRepo := pgrepo.NewCharacterRepository(pool)
 
 	raceSvc := raceUsecase.NewService(raceRepo)
-	charSvc := charUsecase.NewService(charRepo, nil)
+	charSvc := charUsecase.NewService(charRepo, time.Now)
 
 	// 冪等性キー用ストア（REDIS_ADDR 未設定なら無効）。
 	var idemStore idempotency.Store
@@ -74,7 +74,23 @@ func run() error {
 		slog.Info("idempotency enabled", "store", "redis", "addr", cfg.RedisAddr)
 	}
 
+	// 予約パターンの TTL スイーパー: 確定（confirm）されなかった作成（pending）を定期回収する
+	// （消費者は origin を削除しないため、未確定の後始末は origin 側で行う）。
+	sweepCtx, stopSweeper := context.WithCancel(context.Background())
+	defer stopSweeper()
+	if cfg.ReservationSweepInterval > 0 {
+		go runUnconfirmedSweeper(sweepCtx, charSvc, cfg.ReservationTTL, cfg.ReservationSweepInterval)
+		slog.Info("unconfirmed sweeper enabled", "ttl", cfg.ReservationTTL, "interval", cfg.ReservationSweepInterval)
+	}
+
 	e := httpiface.New(cfg, charSvc, raceSvc, pingDB, idemStore)
+
+	// Slowloris 等の低速クライアント対策（ヘッダ・ボディの読み取りと
+	// アイドル接続に上限を設ける）。
+	e.Server.ReadHeaderTimeout = 10 * time.Second
+	e.Server.ReadTimeout = 30 * time.Second
+	e.Server.WriteTimeout = 30 * time.Second
+	e.Server.IdleTimeout = 120 * time.Second
 
 	srvErr := make(chan error, 1)
 	go func() {
@@ -104,6 +120,28 @@ func run() error {
 	}
 	slog.Info("shutdown complete")
 	return nil
+}
+
+// runUnconfirmedSweeper は ctx がキャンセルされるまで interval ごとに、確定されなかった予約
+// （pending）のうち ttl より古いものを回収する。予約パターンの後始末（origin の自己管轄）。
+func runUnconfirmedSweeper(ctx context.Context, svc *charUsecase.Service, ttl, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := svc.SweepUnconfirmed(ctx, ttl)
+			if err != nil {
+				slog.Warn("unconfirmed sweep failed", "error", err)
+				continue
+			}
+			if n > 0 {
+				slog.Info("unconfirmed reservations reclaimed", "count", n)
+			}
+		}
+	}
 }
 
 func setupLogger(level string) {

@@ -66,6 +66,9 @@ type Character struct {
 	Version     int64 // 楽観ロック用。更新のたびに DB 側で +1 される
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	// CreationToken は作成の冪等トークン（消費者の Idempotency-Key 由来。任意）。
+	// 同一トークンの再作成は DB 側の一意制約が弾き、既存行が返る（Redis 非依存の二重作成防止）。
+	CreationToken *string
 }
 
 func New(name, description string, raceID uuid.UUID, gender Gender, now time.Time) (*Character, error) {
@@ -92,7 +95,9 @@ func New(name, description string, raceID uuid.UUID, gender Gender, now time.Tim
 	}, nil
 }
 
-func (c *Character) Update(in UpdateFields, now time.Time) error {
+// Update は PATCH（部分更新）のマージ。version / updated_at は DB 側
+// （update_character 関数とトリガー）が確定するため、ここでは触らない。
+func (c *Character) Update(in UpdateFields) error {
 	if in.Name != nil {
 		n, err := normalizeName(*in.Name)
 		if err != nil {
@@ -120,7 +125,6 @@ func (c *Character) Update(in UpdateFields, now time.Time) error {
 	c.SizeTop = coalesce(in.SizeTop, c.SizeTop)
 	c.SizeMiddle = coalesce(in.SizeMiddle, c.SizeMiddle)
 	c.SizeBottom = coalesce(in.SizeBottom, c.SizeBottom)
-	c.UpdatedAt = now
 	return nil
 }
 
@@ -143,7 +147,8 @@ type ReplaceFields struct {
 
 // Replace は PUT セマンティクス（全置換）。id / created_at / deleted_at 以外を丸ごと上書きし、
 // 任意項目の nil/空はそのまま未設定にする（＝既存値をクリアできる）。
-func (c *Character) Replace(f ReplaceFields, now time.Time) error {
+// version / updated_at は DB 側が確定するため、ここでは触らない。
+func (c *Character) Replace(f ReplaceFields) error {
 	name, err := normalizeName(f.Name)
 	if err != nil {
 		return err
@@ -163,7 +168,6 @@ func (c *Character) Replace(f ReplaceFields, now time.Time) error {
 	c.SizeTop = f.SizeTop
 	c.SizeMiddle = f.SizeMiddle
 	c.SizeBottom = f.SizeBottom
-	c.UpdatedAt = now
 	return nil
 }
 

@@ -374,6 +374,58 @@
                 }
             }
         },
+        "/api/v1/characters/{id}/confirm": {
+            "post": {
+                "security": [
+                    {
+                        "InternalAPIKey": []
+                    }
+                ],
+                "description": "予約パターン: 作成直後の pending を確定（active）し、一覧/取得に出るようにする。冪等。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "characters"
+                ],
+                "summary": "キャラクター予約の確定",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "キャラクターID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.CharacterResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/races": {
             "get": {
                 "security": [

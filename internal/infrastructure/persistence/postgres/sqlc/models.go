@@ -71,8 +71,10 @@ type CoreCharacter struct {
 	SizeMiddle        pgtype.Int2
 	SizeBottom        pgtype.Int2
 	Version           int64
+	CreationToken     pgtype.Text
 	CreatedAt         pgtype.Timestamptz
 	UpdatedAt         pgtype.Timestamptz
+	ConfirmedAt       pgtype.Timestamptz
 	DeletedAt         pgtype.Timestamptz
 }
 

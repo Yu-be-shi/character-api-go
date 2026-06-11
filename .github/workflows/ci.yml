@@ -29,9 +29,8 @@ jobs:
           --health-retries 5
 
     steps:
+      # third_party/character-db のスキーマは vendoring 済み（通常ファイル）なので submodules 不要。
       - uses: actions/checkout@v4
-        with:
-          submodules: true # third_party/character-db（sqlc 生成・統合テストのスキーマ源）
 
       - uses: actions/setup-go@v5
         with:
@@ -51,7 +50,7 @@ jobs:
           INTERNAL_API_KEY: test-key-for-ci
 
       # リポジトリ層の実 DB 統合テスト（version 競合 CH412・論理削除 CH404・FK→ErrInUse・updated_at トリガー）。
-      # submodule の実スキーマ＋ DB 関数を適用して本番同等で検証する。
+      # vendoring した実スキーマ＋ DB 関数を適用して本番同等で検証する。
       - name: integration test (repository, real DB)
         run: go test -race -tags=integration ./internal/infrastructure/persistence/postgres/...
         env:
@@ -84,15 +83,18 @@ jobs:
           # （stdlib の脆弱性は常に「最新で修正済み」なので gate が陳腐化しない）。
           go-version: stable
 
+      # ツール自体は再現性のためバージョン固定（脆弱性 DB はオンライン照会のため陳腐化しない）。
       - name: govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
           "$(go env GOPATH)/bin/govulncheck" ./...
 
       - name: gosec (SAST)
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@latest
-          "$(go env GOPATH)/bin/gosec" -quiet ./...
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
+          # 生成コードは SAST 対象外（sqlc 生成の SQL 文字列が G101 を誤検知するため。
+          # 例: creation_token を含むクエリ定数を「ハードコードされた資格情報」と誤判定）。
+          "$(go env GOPATH)/bin/gosec" -quiet -exclude-generated ./...
 
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
@@ -118,6 +120,14 @@ jobs:
           output: trivy-image.sarif
           severity: HIGH,CRITICAL
           exit-code: "0"
+      # Dependabot/fork PR は GITHUB_TOKEN が read-only に強制され security-events: write が
+      # 無効化される（job の permissions は無視される）。そこで push か「同一リポジトリ発の
+      # 非 Dependabot PR」のときだけ upload する。これで自分のブランチの PR では従来どおり
+      # コードスキャン結果が更新され、Dependabot/fork PR では 403 で落ちない。
       - uses: github/codeql-action/upload-sarif@v3
+        if: >-
+          github.event_name == 'push' ||
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+           github.actor != 'dependabot[bot]')
         with:
           sarif_file: trivy-image.sarif

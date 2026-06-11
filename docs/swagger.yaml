@@ -400,6 +400,39 @@ paths:
       summary: キャラクター更新（全置換）
       tags:
       - characters
+  /api/v1/characters/{id}/confirm:
+    post:
+      description: '予約パターン: 作成直後の pending を確定（active）し、一覧/取得に出るようにする。冪等。'
+      parameters:
+      - description: キャラクターID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.CharacterResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - InternalAPIKey: []
+      summary: キャラクター予約の確定
+      tags:
+      - characters
   /api/v1/races:
     get:
       produces:

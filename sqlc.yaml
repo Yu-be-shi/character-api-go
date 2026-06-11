@@ -1,5 +1,6 @@
-# sqlc 設定。スキーマの正は別リポジトリ character-db（third_party/ に git submodule で固定）。
-# この API はマイグレーションを持たず、submodule のピンを上げることでスキーマ追従する。
+# sqlc 設定。スキーマの正は別リポジトリ character-db。必要なファイルだけを
+# third_party/character-db/ に vendoring（通常ファイルとしてコミット）している。
+# この API はマイグレーションを持たず、schema-sync が vendored ファイルを上書きして追従する。
 #   生成: make sqlc  （docker の sqlc/sqlc を使うので Go へのツール導入は不要）
 version: "2"
 sql:

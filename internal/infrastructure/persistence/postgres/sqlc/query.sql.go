@@ -12,9 +12,67 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const confirmCharacter = `-- name: ConfirmCharacter :one
+SELECT c.id, c.name, c.description, c.race_id, c.gender, c.birth_date, c.birth_place, c.height_cm, c.weight_kg, c.body_fat_percentage, c.size_top, c.size_middle, c.size_bottom, c.version, c.creation_token, c.created_at, c.updated_at, c.confirmed_at, c.deleted_at, r.name AS race_name
+FROM confirm_character($1) AS c
+LEFT JOIN races r ON r.id = c.race_id
+`
+
+type ConfirmCharacterRow struct {
+	ID                uuid.UUID
+	Name              string
+	Description       pgtype.Text
+	RaceID            uuid.UUID
+	Gender            GenderEnum
+	BirthDate         pgtype.Date
+	BirthPlace        pgtype.Text
+	HeightCm          pgtype.Int2
+	WeightKg          pgtype.Int2
+	BodyFatPercentage pgtype.Numeric
+	SizeTop           pgtype.Int2
+	SizeMiddle        pgtype.Int2
+	SizeBottom        pgtype.Int2
+	Version           int64
+	CreationToken     pgtype.Text
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	ConfirmedAt       pgtype.Timestamptz
+	DeletedAt         pgtype.Timestamptz
+	RaceName          pgtype.Text
+}
+
+// 予約の確定（pending → active）。冪等。不在/論理削除/TTL 回収済みは SQLSTATE 'CH404' を RAISE。
+func (q *Queries) ConfirmCharacter(ctx context.Context, id uuid.UUID) (ConfirmCharacterRow, error) {
+	row := q.db.QueryRow(ctx, confirmCharacter, id)
+	var i ConfirmCharacterRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.RaceID,
+		&i.Gender,
+		&i.BirthDate,
+		&i.BirthPlace,
+		&i.HeightCm,
+		&i.WeightKg,
+		&i.BodyFatPercentage,
+		&i.SizeTop,
+		&i.SizeMiddle,
+		&i.SizeBottom,
+		&i.Version,
+		&i.CreationToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ConfirmedAt,
+		&i.DeletedAt,
+		&i.RaceName,
+	)
+	return i, err
+}
+
 const countCharacters = `-- name: CountCharacters :one
 SELECT COUNT(*) FROM core_characters
-WHERE deleted_at IS NULL
+WHERE deleted_at IS NULL AND confirmed_at IS NOT NULL
   AND ($1::uuid[] IS NULL OR id = ANY($1::uuid[]))
 `
 
@@ -25,20 +83,21 @@ func (q *Queries) CountCharacters(ctx context.Context, ids []uuid.UUID) (int64, 
 	return count, err
 }
 
-const createCharacter = `-- name: CreateCharacter :exec
+const createCharacter = `-- name: CreateCharacter :execrows
 
 INSERT INTO core_characters (
     id, name, description, race_id, gender, birth_date, birth_place,
     height_cm, weight_kg, body_fat_percentage, size_top, size_middle, size_bottom,
-    version, created_at, updated_at
+    version, creation_token, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6::date, $7,
+    $1, $2, $3::text, $4, $5,
+    $6::date, $7::varchar,
     $8::smallint, $9::smallint,
     $10::numeric,
     $11::smallint, $12::smallint, $13::smallint,
-    $14, $15, $16
+    $14, $15::text, $16, $17
 )
+ON CONFLICT (creation_token) WHERE creation_token IS NOT NULL DO NOTHING
 `
 
 type CreateCharacterParams struct {
@@ -56,6 +115,7 @@ type CreateCharacterParams struct {
 	SizeMiddle        pgtype.Int2
 	SizeBottom        pgtype.Int2
 	Version           int64
+	CreationToken     pgtype.Text
 	CreatedAt         pgtype.Timestamptz
 	UpdatedAt         pgtype.Timestamptz
 }
@@ -63,8 +123,13 @@ type CreateCharacterParams struct {
 // character / race の SQL。書き込みの不変条件（楽観ロック・論理削除）は
 // character-db 側の DB 関数 update_character / soft_delete_character に集約済みで、
 // ここではそれを呼ぶだけ。読み取りは races を JOIN して race 名を展開する。
-func (q *Queries) CreateCharacter(ctx context.Context, arg CreateCharacterParams) error {
-	_, err := q.db.Exec(ctx, createCharacter,
+// 予約パターン: confirmed_at は NULL（pending）で作成し、所有者紐付け後に confirm_character で確定する。
+// creation_token は作成の冪等トークン。同一トークンの再作成は一意インデックスが弾き
+// （ON CONFLICT DO NOTHING で 0 行）、呼び出し側は既存行を返す（Redis 非依存の永続的な二重作成防止）。
+// description / birth_place は「未設定」を NULL で表現する（空文字と NULL を混在させない。
+// 正規化は repo 層の pgTextOrNull が行う）。
+func (q *Queries) CreateCharacter(ctx context.Context, arg CreateCharacterParams) (int64, error) {
+	result, err := q.db.Exec(ctx, createCharacter,
 		arg.ID,
 		arg.Name,
 		arg.Description,
@@ -79,10 +144,14 @@ func (q *Queries) CreateCharacter(ctx context.Context, arg CreateCharacterParams
 		arg.SizeMiddle,
 		arg.SizeBottom,
 		arg.Version,
+		arg.CreationToken,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const createRace = `-- name: CreateRace :exec
@@ -111,11 +180,23 @@ func (q *Queries) DeleteRace(ctx context.Context, id uuid.UUID) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const gCUnconfirmedCharacters = `-- name: GCUnconfirmedCharacters :one
+SELECT gc_unconfirmed_characters(make_interval(secs => $1::int)) AS deleted
+`
+
+// 確定されなかった予約（pending）を TTL で物理回収する（origin 自身の後始末）。戻り値は削除件数。
+func (q *Queries) GCUnconfirmedCharacters(ctx context.Context, maxAgeSeconds int32) (int32, error) {
+	row := q.db.QueryRow(ctx, gCUnconfirmedCharacters, maxAgeSeconds)
+	var deleted int32
+	err := row.Scan(&deleted)
+	return deleted, err
+}
+
 const getCharacter = `-- name: GetCharacter :one
-SELECT c.id, c.name, c.description, c.race_id, c.gender, c.birth_date, c.birth_place, c.height_cm, c.weight_kg, c.body_fat_percentage, c.size_top, c.size_middle, c.size_bottom, c.version, c.created_at, c.updated_at, c.deleted_at, r.name AS race_name
+SELECT c.id, c.name, c.description, c.race_id, c.gender, c.birth_date, c.birth_place, c.height_cm, c.weight_kg, c.body_fat_percentage, c.size_top, c.size_middle, c.size_bottom, c.version, c.creation_token, c.created_at, c.updated_at, c.confirmed_at, c.deleted_at, r.name AS race_name
 FROM core_characters c
 LEFT JOIN races r ON r.id = c.race_id
-WHERE c.id = $1 AND c.deleted_at IS NULL
+WHERE c.id = $1 AND c.deleted_at IS NULL AND c.confirmed_at IS NOT NULL
 `
 
 type GetCharacterRow struct {
@@ -133,8 +214,10 @@ type GetCharacterRow struct {
 	SizeMiddle        pgtype.Int2
 	SizeBottom        pgtype.Int2
 	Version           int64
+	CreationToken     pgtype.Text
 	CreatedAt         pgtype.Timestamptz
 	UpdatedAt         pgtype.Timestamptz
+	ConfirmedAt       pgtype.Timestamptz
 	DeletedAt         pgtype.Timestamptz
 	RaceName          pgtype.Text
 }
@@ -157,8 +240,69 @@ func (q *Queries) GetCharacter(ctx context.Context, id uuid.UUID) (GetCharacterR
 		&i.SizeMiddle,
 		&i.SizeBottom,
 		&i.Version,
+		&i.CreationToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ConfirmedAt,
+		&i.DeletedAt,
+		&i.RaceName,
+	)
+	return i, err
+}
+
+const getCharacterByToken = `-- name: GetCharacterByToken :one
+SELECT c.id, c.name, c.description, c.race_id, c.gender, c.birth_date, c.birth_place, c.height_cm, c.weight_kg, c.body_fat_percentage, c.size_top, c.size_middle, c.size_bottom, c.version, c.creation_token, c.created_at, c.updated_at, c.confirmed_at, c.deleted_at, r.name AS race_name
+FROM core_characters c
+LEFT JOIN races r ON r.id = c.race_id
+WHERE c.creation_token = $1 AND c.deleted_at IS NULL
+`
+
+type GetCharacterByTokenRow struct {
+	ID                uuid.UUID
+	Name              string
+	Description       pgtype.Text
+	RaceID            uuid.UUID
+	Gender            GenderEnum
+	BirthDate         pgtype.Date
+	BirthPlace        pgtype.Text
+	HeightCm          pgtype.Int2
+	WeightKg          pgtype.Int2
+	BodyFatPercentage pgtype.Numeric
+	SizeTop           pgtype.Int2
+	SizeMiddle        pgtype.Int2
+	SizeBottom        pgtype.Int2
+	Version           int64
+	CreationToken     pgtype.Text
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	ConfirmedAt       pgtype.Timestamptz
+	DeletedAt         pgtype.Timestamptz
+	RaceName          pgtype.Text
+}
+
+// 作成の冪等再生用。トークンで既存行を引く（未確定/確定どちらも対象、論理削除のみ除外）。
+func (q *Queries) GetCharacterByToken(ctx context.Context, creationToken pgtype.Text) (GetCharacterByTokenRow, error) {
+	row := q.db.QueryRow(ctx, getCharacterByToken, creationToken)
+	var i GetCharacterByTokenRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.RaceID,
+		&i.Gender,
+		&i.BirthDate,
+		&i.BirthPlace,
+		&i.HeightCm,
+		&i.WeightKg,
+		&i.BodyFatPercentage,
+		&i.SizeTop,
+		&i.SizeMiddle,
+		&i.SizeBottom,
+		&i.Version,
+		&i.CreationToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ConfirmedAt,
 		&i.DeletedAt,
 		&i.RaceName,
 	)
@@ -177,12 +321,12 @@ func (q *Queries) GetRace(ctx context.Context, id uuid.UUID) (Race, error) {
 }
 
 const listCharacters = `-- name: ListCharacters :many
-SELECT c.id, c.name, c.description, c.race_id, c.gender, c.birth_date, c.birth_place, c.height_cm, c.weight_kg, c.body_fat_percentage, c.size_top, c.size_middle, c.size_bottom, c.version, c.created_at, c.updated_at, c.deleted_at, r.name AS race_name
+SELECT c.id, c.name, c.description, c.race_id, c.gender, c.birth_date, c.birth_place, c.height_cm, c.weight_kg, c.body_fat_percentage, c.size_top, c.size_middle, c.size_bottom, c.version, c.creation_token, c.created_at, c.updated_at, c.confirmed_at, c.deleted_at, r.name AS race_name
 FROM core_characters c
 LEFT JOIN races r ON r.id = c.race_id
-WHERE c.deleted_at IS NULL
+WHERE c.deleted_at IS NULL AND c.confirmed_at IS NOT NULL
   AND ($1::uuid[] IS NULL OR c.id = ANY($1::uuid[]))
-ORDER BY c.created_at ASC
+ORDER BY c.created_at ASC, c.id ASC
 LIMIT NULLIF($3::bigint, 0)
 OFFSET $2::bigint
 `
@@ -208,12 +352,15 @@ type ListCharactersRow struct {
 	SizeMiddle        pgtype.Int2
 	SizeBottom        pgtype.Int2
 	Version           int64
+	CreationToken     pgtype.Text
 	CreatedAt         pgtype.Timestamptz
 	UpdatedAt         pgtype.Timestamptz
+	ConfirmedAt       pgtype.Timestamptz
 	DeletedAt         pgtype.Timestamptz
 	RaceName          pgtype.Text
 }
 
+// id をタイブレークにして同時刻行でもページング順序を安定させる
 func (q *Queries) ListCharacters(ctx context.Context, arg ListCharactersParams) ([]ListCharactersRow, error) {
 	rows, err := q.db.Query(ctx, listCharacters, arg.Ids, arg.Off, arg.Lim)
 	if err != nil {
@@ -238,8 +385,10 @@ func (q *Queries) ListCharacters(ctx context.Context, arg ListCharactersParams) 
 			&i.SizeMiddle,
 			&i.SizeBottom,
 			&i.Version,
+			&i.CreationToken,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ConfirmedAt,
 			&i.DeletedAt,
 			&i.RaceName,
 		); err != nil {
@@ -287,34 +436,36 @@ func (q *Queries) SoftDeleteCharacter(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-const updateCharacter = `-- name: UpdateCharacter :exec
-SELECT update_character(
+const updateCharacter = `-- name: UpdateCharacter :one
+SELECT u.id, u.name, u.description, u.race_id, u.gender, u.birth_date, u.birth_place, u.height_cm, u.weight_kg, u.body_fat_percentage, u.size_top, u.size_middle, u.size_bottom, u.version, u.creation_token, u.created_at, u.updated_at, u.confirmed_at, u.deleted_at, r.name AS race_name
+FROM update_character(
     $1,
     $2::bigint,
     $3,
-    $4,
+    $4::text,
     $5,
     $6,
     $7::date,
-    $8,
+    $8::varchar,
     $9::smallint,
     $10::smallint,
     $11::numeric,
     $12::smallint,
     $13::smallint,
     $14::smallint
-)
+) AS u
+LEFT JOIN races r ON r.id = u.race_id
 `
 
 type UpdateCharacterParams struct {
 	ID                uuid.UUID
 	ExpectedVersion   pgtype.Int8
 	Name              string
-	Description       string
+	Description       pgtype.Text
 	RaceID            uuid.UUID
 	Gender            GenderEnum
 	BirthDate         pgtype.Date
-	BirthPlace        string
+	BirthPlace        pgtype.Text
 	HeightCm          pgtype.Int2
 	WeightKg          pgtype.Int2
 	BodyFatPercentage pgtype.Numeric
@@ -323,11 +474,36 @@ type UpdateCharacterParams struct {
 	SizeBottom        pgtype.Int2
 }
 
+type UpdateCharacterRow struct {
+	ID                uuid.UUID
+	Name              string
+	Description       pgtype.Text
+	RaceID            uuid.UUID
+	Gender            GenderEnum
+	BirthDate         pgtype.Date
+	BirthPlace        pgtype.Text
+	HeightCm          pgtype.Int2
+	WeightKg          pgtype.Int2
+	BodyFatPercentage pgtype.Numeric
+	SizeTop           pgtype.Int2
+	SizeMiddle        pgtype.Int2
+	SizeBottom        pgtype.Int2
+	Version           int64
+	CreationToken     pgtype.Text
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	ConfirmedAt       pgtype.Timestamptz
+	DeletedAt         pgtype.Timestamptz
+	RaceName          pgtype.Text
+}
+
 // 楽観ロック(version 検査+1)と soft-delete フィルタは関数内で行う。
 // expected_version が NULL なら version 検査をスキップ（強制更新）。
 // 競合時は SQLSTATE 'CH412'、不在/削除済みは 'CH404' を RAISE する。
-func (q *Queries) UpdateCharacter(ctx context.Context, arg UpdateCharacterParams) error {
-	_, err := q.db.Exec(ctx, updateCharacter,
+// 関数の RETURNING（更新後の行）をそのまま返し、呼び出し側の再 SELECT
+// （別トランザクションになることによる競合窓・余分な往復）を無くす。
+func (q *Queries) UpdateCharacter(ctx context.Context, arg UpdateCharacterParams) (UpdateCharacterRow, error) {
+	row := q.db.QueryRow(ctx, updateCharacter,
 		arg.ID,
 		arg.ExpectedVersion,
 		arg.Name,
@@ -343,7 +519,30 @@ func (q *Queries) UpdateCharacter(ctx context.Context, arg UpdateCharacterParams
 		arg.SizeMiddle,
 		arg.SizeBottom,
 	)
-	return err
+	var i UpdateCharacterRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.RaceID,
+		&i.Gender,
+		&i.BirthDate,
+		&i.BirthPlace,
+		&i.HeightCm,
+		&i.WeightKg,
+		&i.BodyFatPercentage,
+		&i.SizeTop,
+		&i.SizeMiddle,
+		&i.SizeBottom,
+		&i.Version,
+		&i.CreationToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ConfirmedAt,
+		&i.DeletedAt,
+		&i.RaceName,
+	)
+	return i, err
 }
 
 const updateRace = `-- name: UpdateRace :execrows

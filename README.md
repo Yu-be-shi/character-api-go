@@ -35,18 +35,19 @@ interfaces/http → usecase → domain ← infrastructure/persistence
   `character-db` の DB 関数 `update_character` / `soft_delete_character` を呼ぶだけ。
   関数は競合を SQLSTATE `CH412`、不在/削除済みを `CH404` で返し、`convert.go` が
   ドメインエラー（`ErrVersionConflict` / `ErrNotFound` 等）へ変換する。
-- **スキーマの正は別リポジトリ**：`character-db` を **git submodule**（`third_party/character-db`）で
-  特定コミットに固定し、sqlc はそこの `schema.sql` と `views/10_*.sql` から型を生成する。
-  これによりローカルの並び順や起動中 DB に依存しない、宣言された純粋な依存になる。
+- **スキーマの正は別リポジトリ**：`character-db` の必要なファイルだけを
+  `third_party/character-db/`（`schema.sql` と `views/*.sql`）に **vendoring（通常ファイルとして
+  コミット）** し、sqlc はそこから型を生成する。これによりローカルの並び順や起動中 DB に依存しない、
+  宣言された純粋な依存になる。取り込み元コミットは `third_party/character-db/SOURCE_SHA` に記録する。
+  以前は git submodule だったが、API が使うのは数ファイルだけでリポジトリ全体の展開が無駄だったため変更した。
 
 ```bash
-git submodule update --init                 # 初回・clone 後
-git -C third_party/character-db checkout <sha> && git add third_party/character-db  # スキーマ追従（ピン更新）
-make sqlc                                    # 生成（docker の sqlc/sqlc。Go へのツール導入不要）
+make sqlc   # 生成（docker の sqlc/sqlc。Go へのツール導入不要）。clone 直後そのまま動く（submodule 不要）
 ```
 
-生成物（`internal/.../postgres/sqlc/*.go`）はコミットする。CI はビルド時に submodule 不要
-（生成済みコードを使う）。submodule が要るのは `make sqlc` の再生成と統合テストのみ。
+生成物（`internal/.../postgres/sqlc/*.go`）はコミットする。スキーマ追従は手作業ではなく
+`.github/workflows/schema-sync.yml` が `character-db` の更新通知を受けて vendored ファイルを
+上書きコピー＋ `make sqlc` 再生成＋追従 PR を自動で行う（手動で回すときは `workflow_dispatch`）。
 
 ### エラーハンドリング
 
@@ -58,7 +59,7 @@ make sqlc                                    # 生成（docker の sqlc/sqlc。G
 ## テスト
 
 ```bash
-make test          # go test ./...（CI と同じ）
+make test          # go test -race ./...（CI と同じ）
 go test ./internal/usecase/...   # ユースケースのみ
 ```
 
@@ -68,10 +69,10 @@ go test ./internal/usecase/...   # ユースケースのみ
   パラメータ検証（400）・エラーマッピング（404/422）・正常系（201）をエンドツーエンドに検証
   （`internal/interfaces/http/router_test.go`）。
 - インメモリ fake を使うため、通常のテスト実行に PostgreSQL は不要。
-- **永続化層の統合テスト**（`-tags=integration`）：実 PostgreSQL に対し、submodule の実スキーマ＋
+- **永続化層の統合テスト**（`-tags=integration`）：実 PostgreSQL に対し、vendoring した実スキーマ＋
   DB 関数を適用して version 競合（CH412）・論理削除（CH404）・FK→ErrInUse・NUMERIC 往復・
-  updated_at トリガーを検証する。`git submodule update --init` 済みであることと `TEST_DB_DSN`
-  （無ければ `DB_DSN`）が前提。例: `go test -tags=integration ./internal/infrastructure/persistence/postgres/...`
+  updated_at トリガーを検証する。`TEST_DB_DSN`（無ければ `DB_DSN`）が前提。
+  例: `go test -tags=integration ./internal/infrastructure/persistence/postgres/...`
 
 ## 起動方法
 
@@ -105,12 +106,13 @@ make dev
 |---|---|---|
 | GET | /healthz | Liveness（認証不要・依存に触れない） |
 | GET | /readyz | Readiness（認証不要・DB ping 込み。NG 時 503） |
-| GET | /api/v1/characters | 一覧取得。`?ids=<uuid,...>` バッチ / `?limit=&offset=` ページング。レスポンスは `{ "items": [...], "total": <総件数> }` |
-| POST | /api/v1/characters | 新規作成（race 不在は 422） |
-| GET | /api/v1/characters/:id | 単件取得 |
-| PUT | /api/v1/characters/:id | **全置換**（送らなかった任意項目は NULL になる＝値のクリアはこちら） |
-| PATCH | /api/v1/characters/:id | **部分更新**（送った項目だけ変更。クリアは不可＝PUT を使う） |
-| DELETE | /api/v1/characters/:id | 削除（論理削除: deleted_at を設定） |
+| GET | /api/v1/characters | 一覧取得（**確定済みのみ**）。`?ids=<uuid,...>` バッチ / `?limit=&offset=` ページング。レスポンスは `{ "items": [...], "total": <総件数> }` |
+| POST | /api/v1/characters | **予約作成**（pending・不可視）。race 不在は 422。`Idempotency-Key` は作成の冪等トークンにもなり、DB の一意制約で二重作成を防ぐ |
+| POST | /api/v1/characters/:id/confirm | **予約の確定**（pending → active＝可視化）。冪等。所有リンク作成後に呼ぶ |
+| GET | /api/v1/characters/:id | 単件取得（**確定済みのみ**） |
+| PUT | /api/v1/characters/:id | **全置換**（確定済みのみ。送らなかった任意項目は NULL になる＝値のクリアはこちら） |
+| PATCH | /api/v1/characters/:id | **部分更新**（確定済みのみ。送った項目だけ変更。クリアは不可＝PUT を使う） |
+| DELETE | /api/v1/characters/:id | 削除（論理削除: deleted_at を設定。確定済みのみ） |
 | GET | /api/v1/races | 種族一覧取得 |
 | POST | /api/v1/races | 種族新規作成 |
 | GET | /api/v1/races/:id | 種族単件取得 |
@@ -118,20 +120,45 @@ make dev
 | DELETE | /api/v1/races/:id | 種族削除（**使用中の種族は 409 Conflict**） |
 | GET | /swagger/* | Swagger UI（OpenAPI） |
 
-**ステータスコードの方針**：`404`=対象なし / `400`=形式・パラメータ不正 / `422`=参照先 race が存在しない /
-`409`=使用中 race の削除 or 種族名の重複 / `412`=楽観ロックの版不一致 / `500`=未分類のサーバーエラー（詳細はログのみ）。
+**ステータスコードの方針**：`401`=API キー不一致 / `404`=対象なし / `400`=形式・パラメータ不正
+（不正な `If-Match` 形式を含む） / `413`=リクエストボディ 1MB 超 / `422`=参照先 race が存在しない or
+冪等キーの別ボディ再利用 / `409`=使用中 race の削除 or 種族名の重複 or 冪等キーが処理中 /
+`412`=楽観ロックの版不一致 / `429`=レート制限（`RATE_LIMIT_RPS` 有効時） /
+`500`=未分類のサーバーエラー（詳細はログのみ）。
+
+> `/readyz` は認証不要で 1 リクエスト = 1 DB ping のため、LB のヘルスチェック以外には公開しない
+> （本番では SG / LB 設定で到達元を絞る）。`/swagger/*` も同様に内部公開のみとする。
+
+## 作成の整合性（予約パターン）
+
+キャラ作成は character-api（PostgreSQL）と application（MySQL の所有リンク）の2ストアにまたがり原子的にできない。これを **作成(pending) → 所有リンク → 確定(active)** の3段で行う:
+
+- `POST /characters` は `confirmed_at = NULL`（pending）で作成する。pending は一覧/取得/更新/削除に**出ない**。
+- application が所有リンク（`UserCharacter`）を書いた後、`POST /characters/{id}/confirm` で確定し可視化する。
+- 確定が最後なので「**可視なキャラは必ず所有者を持つ**」が保証される。失敗しても pending が残るだけで可視データに穴は空かない。
+- 確定されなかった pending は、内蔵スイーパーが `gc_unconfirmed_characters`（character-db 側関数）で物理回収する（`RESERVATION_TTL` / `RESERVATION_SWEEP_INTERVAL`）。**消費者は origin を削除しない**＝管轄外削除を避ける。
+- 作成の二重実行は `core_characters.creation_token`（`Idempotency-Key` 由来）の一意制約で永続的に防ぐ（Redis 非依存）。再送は既存行を返す。
 
 ## 並行制御（楽観ロック）と冪等性
 
 - **楽観ロック**：`core_characters.version`（DB の連番）でレコードのバージョンを管理。
   - GET / 作成・更新のレスポンスは `version`（body）と `ETag` ヘッダを返す。
   - PUT / PATCH で `If-Match: "<version>"` を送ると、版が一致するときだけ更新し +1 する。
-    不一致（別の更新が先に入った）なら **412 Precondition Failed**。`If-Match` 省略時は無条件更新（後方互換）。
-- **冪等性キー**：`POST /api/v1/characters` で `Idempotency-Key: <uuid>` を送ると、同一キーの再送は
-  保存済みレスポンスを再生（`Idempotent-Replayed: true`）。処理中の同一キーは 409。
+    不一致（別の更新が先に入った）なら **412 Precondition Failed**。
+  - **`If-Match` 省略時も無条件上書きにはならない**：読み取り時点の version を期待値として
+    使うため、read-modify-write の間に他者の更新が入れば 412 が返り得る（lost update 防止）。
+  - 版検査と +1 は DB 関数 `update_character`（character-db 側）が行う（複数 API で手順がズレない）。
+- **冪等性キー**：`/api/v1` 配下の **すべての POST**（characters / races）で
+  `Idempotency-Key`（200 文字以内）を送ると、同一キー・同一ボディの再送は保存済みレスポンスを
+  再生する（`Idempotent-Replayed: true`。`ETag` / `Location` / `Content-Type` も復元）。
+  - 同一キー・**異なるボディ**は 422（キーの誤用を黙って再生しない）。処理中の同一キーは 409。
+  - キーはエンドポイント（メソッド + パス）にスコープされ、結果の保持期間（TTL）は 24 時間。
   - ストアは Redis（`REDIS_ADDR` 未設定なら機能無効＝ローカル/CI は Redis 不要）。
-  - 実装はクリーンアーキの `infrastructure/idempotency`（Redis/メモリ実装）＋ Echo ミドルウェアで、
-    ハンドラ/ユースケースを汚染しない。PUT/PATCH/DELETE は元々冪等なので対象外。
+  - **Redis 障害時は fail-closed**（503 を返し素通ししない＝正しさ優先・二重作成防止）。加えて作成は
+    DB の `creation_token` 一意制約でも保護されるため、ストア不在でも二重作成しない。
+  - 抽象（`Store`）は `internal/domain/idempotency`、実装（Redis/メモリ）は
+    `infrastructure/idempotency`。Echo ミドルウェアはハンドラ/ユースケースを汚染しない。
+    PUT/PATCH/DELETE は元々冪等なので対象外。
 
 ## 環境変数
 
@@ -142,5 +169,7 @@ make dev
 | `PORT` | | 8080 | リスニングポート |
 | `LOG_LEVEL` | | info | ログレベル |
 | `CORS_ORIGINS` | | http://localhost:3000 | CORS 許可オリジン（カンマ区切り） |
-| `REDIS_ADDR` | | （空＝無効） | 冪等性キー用 Redis のアドレス（例 `character-api-redis:6379`）。空なら冪等性機能を無効化 |
+| `REDIS_ADDR` | | （空＝無効） | 冪等性キー用 Redis のアドレス（例 `character-api-redis:6379`）。空なら冪等性機能を無効化。障害時は fail-closed |
 | `RATE_LIMIT_RPS` | | 0（無効） | `/api/v1` の IP あたり秒間リクエスト上限（無料・インメモリ）。0 で無効 |
+| `RESERVATION_TTL` | | 1h | 予約パターン: 確定されなかった作成（pending）を回収するまでの猶予 |
+| `RESERVATION_SWEEP_INTERVAL` | | 10m | 予約 TTL 回収スイーパーの実行間隔。0 でスイーパー無効 |

@@ -28,6 +28,7 @@ func NewCharacterHandler(svc *usecase.Service) *CharacterHandler {
 func (h *CharacterHandler) Register(g *echo.Group) {
 	g.GET("", h.List)
 	g.POST("", h.Create)
+	g.POST("/:id/confirm", h.Confirm) // 予約パターン: 作成(pending)を確定(active)し可視化する
 	g.GET("/:id", h.Get)
 	g.PUT("/:id", h.Replace) // 全置換（省略した任意項目は NULL になる）
 	g.PATCH("/:id", h.Patch) // 部分更新（送った項目だけ変更）
@@ -36,6 +37,10 @@ func (h *CharacterHandler) Register(g *echo.Group) {
 
 // maxListLimit は ?limit= で指定できる最大件数（無制限取得を防ぐ）。
 const maxListLimit = 500
+
+// defaultListLimit は ?limit= 省略時の件数。未指定で全件返すとデータ増加に伴い
+// 劣化するため、省略時も必ず上限を適用する（?ids= 指定時は ids の件数が上限）。
+const defaultListLimit = 100
 
 // List godoc
 // @Summary      キャラクター一覧取得
@@ -78,6 +83,10 @@ func parseListParams(c echo.Context) (chardomain.ListParams, error) {
 			}
 			p.IDs = append(p.IDs, id)
 		}
+		// ids の個数にも上限を課す（URL 長の許す限り巨大な ANY クエリを打たせない）。
+		if len(p.IDs) > maxListLimit {
+			return p, echo.NewHTTPError(http.StatusBadRequest, "too many ids (max 500)")
+		}
 	}
 
 	if raw := c.QueryParam("limit"); raw != "" {
@@ -86,6 +95,10 @@ func parseListParams(c echo.Context) (chardomain.ListParams, error) {
 			return p, echo.NewHTTPError(http.StatusBadRequest, "limit must be 1..500")
 		}
 		p.Limit = n
+	} else if p.IDs == nil {
+		// ?ids= によるバッチ取得（件数は ids 自体が上限）以外は、limit 省略でも
+		// 全件取得にならないようデフォルトを適用する。
+		p.Limit = defaultListLimit
 	}
 	if raw := c.QueryParam("offset"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -117,25 +130,57 @@ func (h *CharacterHandler) Create(c echo.Context) error {
 	if err := c.Validate(&req); err != nil {
 		return err
 	}
+	// 作成の冪等トークン。Idempotency-Key ヘッダを永続的な二重作成防止に再利用する
+	// （Redis の冪等性ミドルウェアとは独立に、DB の一意制約で同一作成を弾く）。
+	var token *string
+	if k := strings.TrimSpace(c.Request().Header.Get("Idempotency-Key")); k != "" {
+		token = &k
+	}
 	out, err := h.svc.Create(c.Request().Context(), usecase.CreateInput{
-		Name:        req.Name,
-		Description: req.Description,
-		RaceID:      req.RaceID,
-		Gender:      chardomain.Gender(req.Gender),
-		BirthDate:   req.BirthDate,
-		BirthPlace:  req.BirthPlace,
-		HeightCm:    req.HeightCm,
-		WeightKg:    req.WeightKg,
-		BodyFat:     req.BodyFat,
-		SizeTop:     req.SizeTop,
-		SizeMiddle:  req.SizeMiddle,
-		SizeBottom:  req.SizeBottom,
+		Name:          req.Name,
+		Description:   req.Description,
+		RaceID:        req.RaceID,
+		Gender:        chardomain.Gender(req.Gender),
+		BirthDate:     req.BirthDate,
+		BirthPlace:    req.BirthPlace,
+		HeightCm:      req.HeightCm,
+		WeightKg:      req.WeightKg,
+		BodyFat:       req.BodyFat,
+		SizeTop:       req.SizeTop,
+		SizeMiddle:    req.SizeMiddle,
+		SizeBottom:    req.SizeBottom,
+		CreationToken: token,
 	})
 	if err != nil {
 		return mapCharErr(err)
 	}
 	setETag(c, out.Version)
 	return c.JSON(http.StatusCreated, dto.FromDomain(out))
+}
+
+// Confirm godoc
+// @Summary      キャラクター予約の確定
+// @Description  予約パターン: 作成直後の pending を確定（active）し、一覧/取得に出るようにする。冪等。
+// @Tags         characters
+// @Produce      json
+// @Security     InternalAPIKey
+// @Param        id   path      string  true  "キャラクターID (UUID)"
+// @Success      200  {object}  dto.CharacterResponse
+// @Failure      400  {object}  dto.ErrorResponse
+// @Failure      404  {object}  dto.ErrorResponse
+// @Failure      500  {object}  dto.ErrorResponse
+// @Router       /api/v1/characters/{id}/confirm [post]
+func (h *CharacterHandler) Confirm(c echo.Context) error {
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
+	out, err := h.svc.Confirm(c.Request().Context(), id)
+	if err != nil {
+		return mapCharErr(err)
+	}
+	setETag(c, out.Version)
+	return c.JSON(http.StatusOK, dto.FromDomain(out))
 }
 
 // Get godoc
@@ -195,7 +240,7 @@ func (h *CharacterHandler) Replace(c echo.Context) error {
 	if err := c.Validate(&req); err != nil {
 		return err
 	}
-	out, err := h.svc.Replace(c.Request().Context(), id, usecase.CreateInput{
+	out, err := h.svc.Replace(c.Request().Context(), id, usecase.ReplaceInput{
 		Name:        req.Name,
 		Description: req.Description,
 		RaceID:      req.RaceID,
@@ -309,15 +354,22 @@ func parseID(c echo.Context) (uuid.UUID, error) {
 }
 
 // parseIfMatch は If-Match ヘッダから期待バージョン（楽観ロック）を取り出す。
-// 省略 or "*" のときは nil（無条件更新＝後方互換）。`"3"` や `W/"3"` 形式を許容する。
+// 省略 or "*" のときは nil を返す。nil の場合でも usecase 層が読み取り時点の
+// version を期待値として使うため「無条件上書き」にはならない（lost update 防止。
+// 競合すれば 412 が返り得る）。`"3"` 形式のみ受理する。
+// 弱い検証子（W/"3"）は RFC 9110 §13.1.1 のとおり If-Match の強い比較では
+// 決して一致しないため、412 を返す。
+// https://www.rfc-editor.org/rfc/rfc9110#name-if-match
 func parseIfMatch(c echo.Context) (*int64, error) {
 	raw := strings.TrimSpace(c.Request().Header.Get("If-Match"))
 	if raw == "" || raw == "*" {
 		return nil, nil
 	}
-	raw = strings.TrimPrefix(raw, "W/")
-	raw = strings.Trim(raw, `"`)
-	v, err := strconv.ParseInt(raw, 10, 64)
+	if strings.HasPrefix(raw, "W/") {
+		return nil, echo.NewHTTPError(http.StatusPreconditionFailed,
+			"weak entity-tag never matches If-Match (RFC 9110)")
+	}
+	v, err := strconv.ParseInt(strings.Trim(raw, `"`), 10, 64)
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid If-Match header")
 	}

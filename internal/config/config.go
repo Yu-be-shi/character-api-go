@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 )
@@ -20,6 +21,12 @@ type Config struct {
 
 	// RateLimitRPS は /api/v1 への IP あたりの秒間リクエスト上限。0 で無効（既定）。
 	RateLimitRPS float64 `env:"RATE_LIMIT_RPS" envDefault:"0"`
+
+	// 予約パターンの TTL 回収設定。確定（confirm）されなかった作成（pending）を、
+	// ReservationTTL より古くなったらバックグラウンドスイーパーが物理回収する。
+	// ReservationSweepInterval が 0 ならスイーパーを起動しない。
+	ReservationTTL           time.Duration `env:"RESERVATION_TTL"            envDefault:"1h"`
+	ReservationSweepInterval time.Duration `env:"RESERVATION_SWEEP_INTERVAL" envDefault:"10m"`
 }
 
 type DBConfig struct {

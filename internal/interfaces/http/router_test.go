@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -25,8 +26,9 @@ const testAPIKey = "test-internal-key"
 // --- fakes（永続化はインメモリ。ハンドラ→usecase→domain の経路を実機に近い形で検証する）---
 
 type fakeCharRepo struct {
-	store     map[uuid.UUID]*chardomain.Character
-	raceValid func(uuid.UUID) bool // race の存在を模す（FK 違反 → ErrRaceNotFound）
+	store      map[uuid.UUID]*chardomain.Character
+	raceValid  func(uuid.UUID) bool  // race の存在を模す（FK 違反 → ErrRaceNotFound）
+	lastParams chardomain.ListParams // List に渡されたパラメータの検証用
 }
 
 func (r *fakeCharRepo) Save(_ context.Context, c *chardomain.Character) error {
@@ -36,21 +38,30 @@ func (r *fakeCharRepo) Save(_ context.Context, c *chardomain.Character) error {
 	r.store[c.ID] = c
 	return nil
 }
-func (r *fakeCharRepo) Update(_ context.Context, c *chardomain.Character, expectedVersion *int64) error {
+func (r *fakeCharRepo) Confirm(_ context.Context, id uuid.UUID) (*chardomain.Character, error) {
+	c, ok := r.store[id]
+	if !ok {
+		return nil, chardomain.ErrNotFound
+	}
+	return c, nil
+}
+func (r *fakeCharRepo) GC(_ context.Context, _ time.Duration) (int, error) { return 0, nil }
+func (r *fakeCharRepo) Update(_ context.Context, c *chardomain.Character, expectedVersion *int64) (*chardomain.Character, error) {
 	cur, ok := r.store[c.ID]
 	if !ok {
-		return chardomain.ErrNotFound
+		return nil, chardomain.ErrNotFound
 	}
 	if r.raceValid != nil && !r.raceValid(c.RaceID) {
-		return chardomain.ErrRaceNotFound
+		return nil, chardomain.ErrRaceNotFound
 	}
 	if expectedVersion != nil && cur.Version != *expectedVersion {
-		return chardomain.ErrVersionConflict
+		return nil, chardomain.ErrVersionConflict
 	}
 	cp := *c
 	cp.Version = cur.Version + 1
 	r.store[c.ID] = &cp
-	return nil
+	out := cp
+	return &out, nil
 }
 func (r *fakeCharRepo) FindByID(_ context.Context, id uuid.UUID) (*chardomain.Character, error) {
 	c, ok := r.store[id]
@@ -59,7 +70,8 @@ func (r *fakeCharRepo) FindByID(_ context.Context, id uuid.UUID) (*chardomain.Ch
 	}
 	return c, nil
 }
-func (r *fakeCharRepo) List(_ context.Context, _ chardomain.ListParams) ([]*chardomain.Character, error) {
+func (r *fakeCharRepo) List(_ context.Context, p chardomain.ListParams) ([]*chardomain.Character, error) {
+	r.lastParams = p
 	out := make([]*chardomain.Character, 0, len(r.store))
 	for _, c := range r.store {
 		out = append(out, c)
@@ -112,6 +124,11 @@ func (r *fakeRaceRepo) Delete(_ context.Context, id uuid.UUID) error {
 
 // newTestServer はルーターと、seed したテスト用 race の ID を返す。
 func newTestServer(t *testing.T) (*httptest.Server, uuid.UUID) {
+	srv, raceID, _ := newTestServerWithRepo(t)
+	return srv, raceID
+}
+
+func newTestServerWithRepo(t *testing.T) (*httptest.Server, uuid.UUID, *fakeCharRepo) {
 	t.Helper()
 	charRepo := &fakeCharRepo{store: map[uuid.UUID]*chardomain.Character{}}
 	raceRepo := &fakeRaceRepo{store: map[uuid.UUID]*racedomain.Race{}}
@@ -141,7 +158,7 @@ func newTestServer(t *testing.T) (*httptest.Server, uuid.UUID) {
 	e := httpiface.New(cfg, charSvc, raceSvc, nil, nil)
 	srv := httptest.NewServer(e)
 	t.Cleanup(srv.Close)
-	return srv, race.ID
+	return srv, race.ID, charRepo
 }
 
 func do(t *testing.T, srv *httptest.Server, method, path, key, body string) *http.Response {
@@ -327,6 +344,40 @@ func TestBodyLimit_RejectsLargeBody(t *testing.T) {
 	body := `{"name":"` + big + `","raceId":"` + raceID.String() + `","gender":"female"}`
 	res := do(t, srv, http.MethodPost, "/api/v1/characters", testAPIKey, body)
 	assert.Equal(t, http.StatusRequestEntityTooLarge, res.StatusCode)
+}
+
+func TestListCharacters_DefaultLimitApplied(t *testing.T) {
+	srv, raceID, repo := newTestServerWithRepo(t)
+	createCharacter(t, srv, raceID)
+
+	// limit 省略 → デフォルト 100 が適用される（全件取得にならない）。
+	res := do(t, srv, http.MethodGet, "/api/v1/characters", testAPIKey, "")
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, 100, repo.lastParams.Limit)
+
+	// ?ids= のバッチ取得時はデフォルト limit を適用しない（ids 自体が上限）。
+	res = do(t, srv, http.MethodGet, "/api/v1/characters?ids="+uuid.NewString(), testAPIKey, "")
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, 0, repo.lastParams.Limit)
+
+	// 明示指定はそのまま通る。
+	res = do(t, srv, http.MethodGet, "/api/v1/characters?limit=42", testAPIKey, "")
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, 42, repo.lastParams.Limit)
+
+	// 上限超過は 400。
+	res = do(t, srv, http.MethodGet, "/api/v1/characters?limit=501", testAPIKey, "")
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+}
+
+func TestReplaceCharacter_WeakIfMatch_Rejected(t *testing.T) {
+	srv, raceID := newTestServer(t)
+	id := createCharacter(t, srv, raceID)
+
+	// 弱い検証子は If-Match の強い比較では一致しない（RFC 9110）→ 412。
+	body := `{"name":"x","raceId":"` + raceID.String() + `","gender":"female"}`
+	res := putWithIfMatch(t, srv, "/api/v1/characters/"+id, `W/"1"`, body)
+	assert.Equal(t, http.StatusPreconditionFailed, res.StatusCode)
 }
 
 func TestReplaceCharacter_MatchingVersion_BumpsETag(t *testing.T) {
