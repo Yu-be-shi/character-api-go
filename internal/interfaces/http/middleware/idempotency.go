@@ -2,16 +2,22 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/yu-be-shi/character-api/internal/infrastructure/idempotency"
+	"github.com/yu-be-shi/character-api/internal/domain/idempotency"
 )
+
+// storeOpTimeout はレスポンス確定後のストア操作（Complete / Release）の上限時間。
+// リクエスト context から切り離して使うため、無制限にしない。
+const storeOpTimeout = 5 * time.Second
 
 // IdempotencyKeyHeader はクライアントが送る冪等キーのヘッダ名。
 const IdempotencyKeyHeader = "Idempotency-Key"
@@ -32,9 +38,9 @@ var replayHeaders = []string{echo.HeaderContentType, "ETag", "Location"}
 //   - 同一キー・異なるボディは 422（キーの誤用を黙って再生しない）。
 //   - 処理中の同一キーは 409。
 //   - ストア障害時は可用性優先で通常処理（fail-open）。
-//   - 成功時のみ結果を保存し、ハンドラのエラー・panic 時は defer で予約を解放して
-//     同一キーで再試行できるようにする（panic は外側の Recover まで巻き戻る途中で
-//     この defer が実行される）。
+//   - 成功時のみ結果を保存し、ハンドラのエラー・panic・直接書き込まれた 5xx の場合は
+//     defer で予約を解放して同一キーで再試行できるようにする（panic は外側の Recover
+//     まで巻き戻る途中でこの defer が実行される）。
 func Idempotency(store idempotency.Store) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -71,12 +77,17 @@ func Idempotency(store idempotency.Store) echo.MiddlewareFunc {
 			}
 
 			// 未完了（エラー・panic・保存失敗）なら予約を解放して再試行可能にする。
+			// レスポンス送信後にクライアントが切断するとリクエスト context は cancel
+			// されるため、ストア操作は WithoutCancel で切り離す（cancel に巻き込まれて
+			// 予約が解放されず、再送が 409 になり続けるのを防ぐ）。
 			completed := false
 			defer func() {
 				if completed {
 					return
 				}
-				if err := store.Release(ctx, storeKey); err != nil {
+				rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), storeOpTimeout)
+				defer cancel()
+				if err := store.Release(rctx, storeKey); err != nil {
 					slog.Warn("idempotency release failed", "key", storeKey, "error", err)
 				}
 			}()
@@ -86,6 +97,12 @@ func Idempotency(store idempotency.Store) echo.MiddlewareFunc {
 
 			if err := next(c); err != nil {
 				return err
+			}
+			// ハンドラがエラーを return せず直接 5xx を書き込んだ場合も確定結果として
+			// 保存しない（サーバー都合の失敗を 24h 再生し続けないため。defer が予約を
+			// 解放するので同一キーで再試行できる）。
+			if rec.status >= http.StatusInternalServerError {
+				return nil
 			}
 			res := idempotency.Result{
 				Status:   rec.status,
@@ -98,7 +115,12 @@ func Idempotency(store idempotency.Store) echo.MiddlewareFunc {
 					res.Header[k] = v
 				}
 			}
-			if err := store.Complete(ctx, storeKey, res); err != nil {
+			// レスポンスは送信済みのためリクエスト context は既に不要。クライアント
+			// 切断による cancel でここが失敗すると「201 を受け取ったのに保存されず、
+			// 再送で二重作成される」窓ができるため、WithoutCancel で切り離す。
+			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), storeOpTimeout)
+			defer cancel()
+			if err := store.Complete(cctx, storeKey, res); err != nil {
 				// レスポンスは送信済みなのでクライアントにはエラーを返さない。
 				// 保存失敗は「再送時に再生されない」だけで、defer が予約を解放する。
 				slog.Warn("idempotency complete failed", "key", storeKey, "error", err)

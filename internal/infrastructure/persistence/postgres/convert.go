@@ -33,7 +33,7 @@ func pgCode(err error) (string, bool) {
 func pgText(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
 
 // pgTextOrNull は空文字を NULL に正規化する（任意テキスト項目用）。
-// 複数 API が共有する DB で「未設定」の表現を NULL に統一し、'' と NULL を混在させない。
+// 複数 API が共有する DB で「未設定」の表現を NULL に統一し、空文字と NULL を混在させない。
 func pgTextOrNull(s string) pgtype.Text {
 	if s == "" {
 		return pgtype.Text{}

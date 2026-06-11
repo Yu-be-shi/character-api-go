@@ -1,6 +1,8 @@
 package middleware_test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -172,5 +174,87 @@ func TestIdempotency_ReleasesOnPanic(t *testing.T) {
 
 	require.Equal(t, http.StatusInternalServerError, r1.Code)
 	assert.Equal(t, http.StatusCreated, r2.Code, "panic 時は予約が解放され再試行できる")
+	assert.Equal(t, int32(2), calls)
+}
+
+// brokenStore は常にエラーを返す Store（fail-open の検証用）。
+type brokenStore struct{}
+
+func (brokenStore) Begin(_ context.Context, _ string) (*idempotency.Result, bool, error) {
+	return nil, false, errors.New("store down")
+}
+func (brokenStore) Complete(_ context.Context, _ string, _ idempotency.Result) error {
+	return errors.New("store down")
+}
+func (brokenStore) Release(_ context.Context, _ string) error { return errors.New("store down") }
+
+// pendingStore は常に「処理中」を返す Store（409 分岐の検証用）。
+type pendingStore struct{}
+
+func (pendingStore) Begin(_ context.Context, _ string) (*idempotency.Result, bool, error) {
+	return nil, false, nil // 予約済み・結果未確定 = 処理中
+}
+func (pendingStore) Complete(_ context.Context, _ string, _ idempotency.Result) error { return nil }
+func (pendingStore) Release(_ context.Context, _ string) error                        { return nil }
+
+func TestIdempotency_InProgressSameKey_Returns409(t *testing.T) {
+	var calls int32
+	e := echo.New()
+	e.Use(mw.Idempotency(pendingStore{}))
+	e.POST("/things", func(c echo.Context) error {
+		atomic.AddInt32(&calls, 1)
+		return c.JSON(http.StatusCreated, echo.Map{"ok": true})
+	})
+
+	r := postBody(e, "/things", "k1", "{}")
+
+	assert.Equal(t, http.StatusConflict, r.Code, "処理中の同一キーは 409")
+	assert.Equal(t, int32(0), calls, "ハンドラは実行されない")
+}
+
+func TestIdempotency_StoreFailure_FailsOpen(t *testing.T) {
+	var calls int32
+	e := echo.New()
+	e.Use(mw.Idempotency(brokenStore{}))
+	e.POST("/things", func(c echo.Context) error {
+		atomic.AddInt32(&calls, 1)
+		return c.JSON(http.StatusCreated, echo.Map{"ok": true})
+	})
+
+	r1 := postBody(e, "/things", "k1", "{}")
+	r2 := postBody(e, "/things", "k1", "{}")
+
+	require.Equal(t, http.StatusCreated, r1.Code)
+	require.Equal(t, http.StatusCreated, r2.Code)
+	assert.Equal(t, int32(2), calls, "ストア障害時は可用性優先で毎回実行（fail-open）")
+}
+
+func TestIdempotency_KeyTooLong_Returns400(t *testing.T) {
+	var calls int32
+	e := newIdemApp(&calls, false)
+
+	r := postBody(e, "/things", strings.Repeat("x", 201), "{}")
+
+	assert.Equal(t, http.StatusBadRequest, r.Code)
+	assert.Equal(t, int32(0), calls)
+}
+
+func TestIdempotency_Direct5xx_NotStored(t *testing.T) {
+	var calls int32
+	e := echo.New()
+	e.Use(mw.Idempotency(idempotency.NewMemoryStore()))
+	e.POST("/things", func(c echo.Context) error {
+		// エラーを return せず直接 5xx を書き込むハンドラ。
+		if atomic.AddInt32(&calls, 1) == 1 {
+			return c.JSON(http.StatusServiceUnavailable, echo.Map{"error": "downstream down"})
+		}
+		return c.JSON(http.StatusCreated, echo.Map{"ok": true})
+	})
+
+	r1 := postBody(e, "/things", "k1", "{}")
+	r2 := postBody(e, "/things", "k1", "{}")
+
+	require.Equal(t, http.StatusServiceUnavailable, r1.Code)
+	assert.Equal(t, http.StatusCreated, r2.Code, "直接書き込まれた 5xx は保存されず再試行できる")
 	assert.Equal(t, int32(2), calls)
 }

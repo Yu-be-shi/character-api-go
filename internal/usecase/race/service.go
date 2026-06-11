@@ -2,7 +2,6 @@ package race
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -34,11 +33,19 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Race, err
 }
 
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (*domain.Race, error) {
-	return s.repo.FindByID(ctx, id)
+	r, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("usecase get race: %w", err)
+	}
+	return r, nil
 }
 
 func (s *Service) List(ctx context.Context) ([]*domain.Race, error) {
-	return s.repo.List(ctx)
+	rs, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("usecase list races: %w", err)
+	}
+	return rs, nil
 }
 
 type UpdateInput struct {
@@ -60,10 +67,9 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*do
 }
 
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
+	// %w で包んでも errors.Is(err, domain.ErrNotFound) は透過するため、
+	// エラー種別での分岐は不要（常に文脈を付けて包む）。
 	if err := s.repo.Delete(ctx, id); err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return err
-		}
 		return fmt.Errorf("usecase delete race: %w", err)
 	}
 	return nil

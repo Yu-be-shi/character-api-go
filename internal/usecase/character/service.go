@@ -64,18 +64,24 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Character
 }
 
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (*domain.Character, error) {
-	return s.repo.FindByID(ctx, id)
+	c, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("usecase get character: %w", err)
+	}
+	return c, nil
 }
 
 // List は items と、Limit/Offset を無視した総件数 total を返す（ページャ用）。
+// items と total は別クエリ（別スナップショット）のため瞬間的に不整合になり得るが、
+// ページャ用途では許容する。
 func (s *Service) List(ctx context.Context, p domain.ListParams) ([]*domain.Character, int64, error) {
 	items, err := s.repo.List(ctx, p)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("usecase list characters: %w", err)
 	}
 	total, err := s.repo.Count(ctx, p)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("usecase count characters: %w", err)
 	}
 	return items, total, nil
 }

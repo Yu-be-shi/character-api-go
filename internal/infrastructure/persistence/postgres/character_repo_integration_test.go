@@ -218,3 +218,50 @@ func TestIntegration_RaceInUse(t *testing.T) {
 	err := raceRepo.Delete(context.Background(), raceID)
 	assert.ErrorIs(t, err, racedomain.ErrInUse)
 }
+
+// List の実 SQL（uuid[] フィルタ・NULLIF による LIMIT 0=無制限・created_at,id の
+// 安定ソート・OFFSET）を実 DB で検証する。
+func TestIntegration_List_FilterPagingOrder(t *testing.T) {
+	pool := setupPool(t)
+	repo := pgrepo.NewCharacterRepository(pool)
+	raceID := seedRaceRow(t, pool)
+
+	// created_at を同時刻に揃え、タイブレーク（id ASC）でのみ順序が決まる状況を作る。
+	now := time.Now()
+	chars := make([]*chardomain.Character, 0, 3)
+	for _, name := range []string{"ア", "イ", "ウ"} {
+		c, err := chardomain.New(name, "", raceID, chardomain.GenderUnknown, now)
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(context.Background(), c))
+		chars = append(chars, c)
+	}
+
+	// 全件: created_at が同値なので id ASC で安定して返る。
+	all, err := repo.List(context.Background(), chardomain.ListParams{})
+	require.NoError(t, err)
+	require.Len(t, all, 3)
+	for i := 1; i < len(all); i++ {
+		assert.True(t, all[i-1].ID.String() < all[i].ID.String(),
+			"created_at 同値時は id ASC のタイブレークで安定すること")
+	}
+
+	// limit/offset: 2 ページ目に 3 件目だけが来る。
+	page2, err := repo.List(context.Background(), chardomain.ListParams{Limit: 2, Offset: 2})
+	require.NoError(t, err)
+	require.Len(t, page2, 1)
+	assert.Equal(t, all[2].ID, page2[0].ID)
+
+	// ids フィルタ: 指定した 2 件だけが返る（論理削除済みは除外される）。
+	require.NoError(t, repo.Delete(context.Background(), chars[0].ID))
+	got, err := repo.List(context.Background(), chardomain.ListParams{
+		IDs: []uuid.UUID{chars[0].ID, chars[1].ID},
+	})
+	require.NoError(t, err)
+	require.Len(t, got, 1, "論理削除済みの ID は ids 指定でも返らない")
+	assert.Equal(t, chars[1].ID, got[0].ID)
+
+	// Count も同じ絞り込みに従う。
+	total, err := repo.Count(context.Background(), chardomain.ListParams{})
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, total)
+}

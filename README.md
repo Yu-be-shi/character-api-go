@@ -58,7 +58,7 @@ make sqlc                                    # 生成（docker の sqlc/sqlc。G
 ## テスト
 
 ```bash
-make test          # go test ./...（CI と同じ）
+make test          # go test -race ./...（CI と同じ）
 go test ./internal/usecase/...   # ユースケースのみ
 ```
 
@@ -118,20 +118,33 @@ make dev
 | DELETE | /api/v1/races/:id | 種族削除（**使用中の種族は 409 Conflict**） |
 | GET | /swagger/* | Swagger UI（OpenAPI） |
 
-**ステータスコードの方針**：`404`=対象なし / `400`=形式・パラメータ不正 / `422`=参照先 race が存在しない /
-`409`=使用中 race の削除 or 種族名の重複 / `412`=楽観ロックの版不一致 / `500`=未分類のサーバーエラー（詳細はログのみ）。
+**ステータスコードの方針**：`401`=API キー不一致 / `404`=対象なし / `400`=形式・パラメータ不正
+（不正な `If-Match` 形式を含む） / `413`=リクエストボディ 1MB 超 / `422`=参照先 race が存在しない or
+冪等キーの別ボディ再利用 / `409`=使用中 race の削除 or 種族名の重複 or 冪等キーが処理中 /
+`412`=楽観ロックの版不一致 / `429`=レート制限（`RATE_LIMIT_RPS` 有効時） /
+`500`=未分類のサーバーエラー（詳細はログのみ）。
+
+> `/readyz` は認証不要で 1 リクエスト = 1 DB ping のため、LB のヘルスチェック以外には公開しない
+> （本番では SG / LB 設定で到達元を絞る）。`/swagger/*` も同様に内部公開のみとする。
 
 ## 並行制御（楽観ロック）と冪等性
 
 - **楽観ロック**：`core_characters.version`（DB の連番）でレコードのバージョンを管理。
   - GET / 作成・更新のレスポンスは `version`（body）と `ETag` ヘッダを返す。
   - PUT / PATCH で `If-Match: "<version>"` を送ると、版が一致するときだけ更新し +1 する。
-    不一致（別の更新が先に入った）なら **412 Precondition Failed**。`If-Match` 省略時は無条件更新（後方互換）。
-- **冪等性キー**：`POST /api/v1/characters` で `Idempotency-Key: <uuid>` を送ると、同一キーの再送は
-  保存済みレスポンスを再生（`Idempotent-Replayed: true`）。処理中の同一キーは 409。
+    不一致（別の更新が先に入った）なら **412 Precondition Failed**。
+  - **`If-Match` 省略時も無条件上書きにはならない**：読み取り時点の version を期待値として
+    使うため、read-modify-write の間に他者の更新が入れば 412 が返り得る（lost update 防止）。
+  - 版検査と +1 は DB 関数 `update_character`（character-db 側）が行う（複数 API で手順がズレない）。
+- **冪等性キー**：`/api/v1` 配下の **すべての POST**（characters / races）で
+  `Idempotency-Key`（200 文字以内）を送ると、同一キー・同一ボディの再送は保存済みレスポンスを
+  再生する（`Idempotent-Replayed: true`。`ETag` / `Location` / `Content-Type` も復元）。
+  - 同一キー・**異なるボディ**は 422（キーの誤用を黙って再生しない）。処理中の同一キーは 409。
+  - キーはエンドポイント（メソッド + パス）にスコープされ、結果の保持期間（TTL）は 24 時間。
   - ストアは Redis（`REDIS_ADDR` 未設定なら機能無効＝ローカル/CI は Redis 不要）。
-  - 実装はクリーンアーキの `infrastructure/idempotency`（Redis/メモリ実装）＋ Echo ミドルウェアで、
-    ハンドラ/ユースケースを汚染しない。PUT/PATCH/DELETE は元々冪等なので対象外。
+  - 抽象（`Store`）は `internal/domain/idempotency`、実装（Redis/メモリ）は
+    `infrastructure/idempotency`。Echo ミドルウェアはハンドラ/ユースケースを汚染しない。
+    PUT/PATCH/DELETE は元々冪等なので対象外。
 
 ## 環境変数
 

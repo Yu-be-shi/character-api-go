@@ -26,7 +26,7 @@ const testAPIKey = "test-internal-key"
 
 type fakeCharRepo struct {
 	store      map[uuid.UUID]*chardomain.Character
-	raceValid  func(uuid.UUID) bool // race の存在を模す（FK 違反 → ErrRaceNotFound）
+	raceValid  func(uuid.UUID) bool  // race の存在を模す（FK 違反 → ErrRaceNotFound）
 	lastParams chardomain.ListParams // List に渡されたパラメータの検証用
 }
 

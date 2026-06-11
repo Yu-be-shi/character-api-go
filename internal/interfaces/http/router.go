@@ -17,7 +17,7 @@ import (
 	_ "github.com/yu-be-shi/character-api/docs"
 	"github.com/yu-be-shi/character-api/internal/config"
 	chardomain "github.com/yu-be-shi/character-api/internal/domain/character"
-	"github.com/yu-be-shi/character-api/internal/infrastructure/idempotency"
+	"github.com/yu-be-shi/character-api/internal/domain/idempotency"
 	"github.com/yu-be-shi/character-api/internal/interfaces/http/handler"
 	apimw "github.com/yu-be-shi/character-api/internal/interfaces/http/middleware"
 	charUsecase "github.com/yu-be-shi/character-api/internal/usecase/character"
@@ -95,11 +95,21 @@ func New(cfg config.Config, charSvc *charUsecase.Service, raceSvc *raceUsecase.S
 	}
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
-	api := e.Group("/api/v1", apimw.InternalAPIKey(cfg.InternalAPIKey))
+	api := e.Group("/api/v1")
 	if cfg.RateLimitRPS > 0 {
 		// IP あたりのレート制限（無料・インメモリ）。0 で無効。
-		api.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(cfg.RateLimitRPS))))
+		// 認証より「前」に置く: 後ろに置くと不正キーでの総当たり（401 連打）が
+		// レート制限を一切受けない。Burst は RPS<1 の設定でも最低 1 を保証する
+		// （int(0.5)=0 だと全リクエストが 429 になるため）。
+		burst := int(cfg.RateLimitRPS)
+		if burst < 1 {
+			burst = 1
+		}
+		api.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStoreWithConfig(
+			middleware.RateLimiterMemoryStoreConfig{Rate: rate.Limit(cfg.RateLimitRPS), Burst: burst},
+		)))
 	}
+	api.Use(apimw.InternalAPIKey(cfg.InternalAPIKey))
 	if idemStore != nil {
 		// POST のみ冪等化（ミドルウェア内で非 POST は素通し）。
 		api.Use(apimw.Idempotency(idemStore))

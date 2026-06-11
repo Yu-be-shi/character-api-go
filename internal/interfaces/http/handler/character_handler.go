@@ -82,6 +82,10 @@ func parseListParams(c echo.Context) (chardomain.ListParams, error) {
 			}
 			p.IDs = append(p.IDs, id)
 		}
+		// ids の個数にも上限を課す（URL 長の許す限り巨大な ANY クエリを打たせない）。
+		if len(p.IDs) > maxListLimit {
+			return p, echo.NewHTTPError(http.StatusBadRequest, "too many ids (max 500)")
+		}
 	}
 
 	if raw := c.QueryParam("limit"); raw != "" {
@@ -203,7 +207,7 @@ func (h *CharacterHandler) Replace(c echo.Context) error {
 	if err := c.Validate(&req); err != nil {
 		return err
 	}
-	out, err := h.svc.Replace(c.Request().Context(), id, usecase.CreateInput{
+	out, err := h.svc.Replace(c.Request().Context(), id, usecase.ReplaceInput{
 		Name:        req.Name,
 		Description: req.Description,
 		RaceID:      req.RaceID,
@@ -317,7 +321,9 @@ func parseID(c echo.Context) (uuid.UUID, error) {
 }
 
 // parseIfMatch は If-Match ヘッダから期待バージョン（楽観ロック）を取り出す。
-// 省略 or "*" のときは nil（無条件更新）。`"3"` 形式のみ受理する。
+// 省略 or "*" のときは nil を返す。nil の場合でも usecase 層が読み取り時点の
+// version を期待値として使うため「無条件上書き」にはならない（lost update 防止。
+// 競合すれば 412 が返り得る）。`"3"` 形式のみ受理する。
 // 弱い検証子（W/"3"）は RFC 9110 §13.1.1 のとおり If-Match の強い比較では
 // 決して一致しないため、412 を返す。
 // https://www.rfc-editor.org/rfc/rfc9110#name-if-match
