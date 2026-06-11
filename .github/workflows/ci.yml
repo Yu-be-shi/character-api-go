@@ -92,7 +92,9 @@ jobs:
       - name: gosec (SAST)
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
-          "$(go env GOPATH)/bin/gosec" -quiet ./...
+          # 生成コードは SAST 対象外（sqlc 生成の SQL 文字列が G101 を誤検知するため。
+          # 例: creation_token を含むクエリ定数を「ハードコードされた資格情報」と誤判定）。
+          "$(go env GOPATH)/bin/gosec" -quiet -exclude-generated ./...
 
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
