@@ -22,10 +22,11 @@ BEGIN
         RETURNING id INTO v_char_id;
 
     -- 0. 予約パターン: 作成直後は pending（confirmed_at IS NULL）。
-    --    v1 に出ず、update/soft_delete は CH404。confirm で可視化、再 confirm は冪等。
-    SELECT count(*) INTO v_count FROM v1_characters WHERE id = v_char_id;
+    --    可視（確定済み・生存）に出ず、update/soft_delete は CH404。confirm で可視化、再 confirm は冪等。
+    SELECT count(*) INTO v_count FROM core_characters
+        WHERE id = v_char_id AND deleted_at IS NULL AND confirmed_at IS NOT NULL;
     IF v_count <> 0 THEN
-        RAISE EXCEPTION '予約パターン: 未確定の行が v1_characters に見えている';
+        RAISE EXCEPTION '予約パターン: 未確定の行が可視（確定済み・生存）に見えている';
     END IF;
 
     v_caught := FALSE;
@@ -45,10 +46,11 @@ BEGIN
     END IF;
     -- 再 confirm は冪等（例外を上げず同じ行を返す）。
     PERFORM confirm_character(v_char_id);
-    -- 確定後は v1 に出る（version は 1 のまま）。
-    SELECT count(*) INTO v_count FROM v1_characters WHERE id = v_char_id AND version = 1;
+    -- 確定後は可視（確定済み・生存）に出る（version は 1 のまま）。
+    SELECT count(*) INTO v_count FROM core_characters
+        WHERE id = v_char_id AND deleted_at IS NULL AND confirmed_at IS NOT NULL AND version = 1;
     IF v_count <> 1 THEN
-        RAISE EXCEPTION '予約パターン: 確定後に v1_characters へ昇格していない';
+        RAISE EXCEPTION '予約パターン: 確定後に可視（確定済み・生存）へ昇格していない';
     END IF;
 
     -- 1. update_character: 正しい version で更新 → version 1→2。
@@ -75,10 +77,11 @@ BEGIN
         RAISE EXCEPTION 'update_character: 版不一致で CH412 が上がらない';
     END IF;
 
-    -- 3. v1_characters: 生存中は見え、version / updated_at を含む。
-    SELECT count(*) INTO v_count FROM v1_characters WHERE id = v_char_id AND version = 2;
+    -- 3. 可視（確定済み・生存）: 生存中は見え、version を含む。
+    SELECT count(*) INTO v_count FROM core_characters
+        WHERE id = v_char_id AND deleted_at IS NULL AND confirmed_at IS NOT NULL AND version = 2;
     IF v_count <> 1 THEN
-        RAISE EXCEPTION 'v1_characters: 生存行が見えない/version が読めない';
+        RAISE EXCEPTION '可視（確定済み・生存）: 生存行が見えない/version が読めない';
     END IF;
 
     -- 4. soft_delete_character: 版不一致は CH412（v_char_id は現在 version=2）。
@@ -92,11 +95,12 @@ BEGIN
         RAISE EXCEPTION 'soft_delete_character: 版不一致で CH412 が上がらない';
     END IF;
 
-    -- 5. soft_delete_character: 版省略（NULL）で削除でき、v1_characters から消える。
+    -- 5. soft_delete_character: 版省略（NULL）で削除でき、可視（確定済み・生存）から消える。
     PERFORM soft_delete_character(v_char_id);
-    SELECT count(*) INTO v_count FROM v1_characters WHERE id = v_char_id;
+    SELECT count(*) INTO v_count FROM core_characters
+        WHERE id = v_char_id AND deleted_at IS NULL AND confirmed_at IS NOT NULL;
     IF v_count <> 0 THEN
-        RAISE EXCEPTION 'v1_characters: 論理削除済みの行が見えている';
+        RAISE EXCEPTION '可視（確定済み・生存）: 論理削除済みの行が見えている';
     END IF;
 
     -- 6. 削除済み/不在に対する再操作は CH404。
