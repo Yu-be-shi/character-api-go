@@ -29,7 +29,7 @@ jobs:
           --health-retries 5
 
     steps:
-      # third_party/character-db のスキーマは vendoring 済み（通常ファイル）なので submodules 不要。
+      # スキーマ（schema.sql / migrations / views / seeds）は自リポジトリが所有する。
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
@@ -131,3 +131,71 @@ jobs:
            github.actor != 'dependabot[bot]')
         with:
           sarif_file: trivy-image.sarif
+
+  # スキーマ（schema.sql / migrations / views / seeds）の検証。API がスキーマを所有するため
+  # この PR 自身で検証する: (1) atlas.sum 整合 (2) squawk 安全リンタ (3) 本番同等の migrate
+  # イメージで「atlas apply → views → seeds」を流し切れること (4) 振る舞いテスト
+  # (5) schema.sql と migrations/ の乖離検知（make migration 忘れの検出）。
+  schema:
+    name: Validate schema & migrations
+    runs-on: ubuntu-latest
+    env:
+      ATLAS_IMAGE: arigaio/atlas:1.2.2
+      SQUAWK_VERSION: 2.57.0
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: characters_test
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: testpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d characters_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate atlas.sum integrity
+        run: |
+          docker run --rm -v ${{ github.workspace }}/migrations:/migrations \
+            "$ATLAS_IMAGE" migrate validate --dir "file:///migrations"
+
+      - name: Lint SQL (squawk)
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/work -w /work node:20-slim \
+            sh -c "npx --yes squawk-cli@$SQUAWK_VERSION -c squawk.toml migrations/*.sql views/*.sql seeds/*.sql"
+
+      - name: Build migration image
+        run: docker build -f Dockerfile.migrate -t cdb-migrate .
+
+      - name: Apply migrations + views + seeds against test DB
+        run: |
+          docker run --rm --network host cdb-migrate \
+            "--url=postgres://app:testpassword@localhost:5432/characters_test?sslmode=disable"
+
+      - name: Behavior tests (DB functions / trigger / view)
+        run: |
+          docker run --rm --network host -v ${{ github.workspace }}/tests:/tests postgres:16-alpine \
+            psql "postgres://app:testpassword@localhost:5432/characters_test?sslmode=disable" \
+            -v ON_ERROR_STOP=1 -f /tests/behavior.sql
+
+      - name: Check schema.sql / migrations drift
+        run: |
+          set -o pipefail
+          docker run --rm --network host postgres:16-alpine \
+            psql "postgres://app:testpassword@localhost:5432/characters_test?sslmode=disable" \
+            -c "CREATE DATABASE atlas_dev;"
+          docker run --rm --network host -v ${{ github.workspace }}:/workspace -w /workspace \
+            "$ATLAS_IMAGE" schema diff \
+            --from "file://migrations" \
+            --to "file://schema.sql" \
+            --dev-url "postgres://app:testpassword@localhost:5432/atlas_dev?sslmode=disable&search_path=public" \
+            | tee /tmp/drift.txt
+          grep -q "Schemas are synced" /tmp/drift.txt || {
+            echo "::error::schema.sql と migrations/ が乖離しています（make migration を実行してください）"
+            exit 1
+          }

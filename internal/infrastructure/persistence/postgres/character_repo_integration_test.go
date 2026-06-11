@@ -5,7 +5,7 @@
 // `go test -tags=integration ./internal/infrastructure/persistence/postgres/...` で実行する。
 // 接続先は TEST_DB_DSN（無ければ DB_DSN）。どちらも無ければ skip。
 //
-// スキーマは character-db から third_party/ に vendoring した実ファイル
+// スキーマはこのリポジトリが所有する実ファイル
 // （schema.sql・views/00_set_updated_at.sql・views/10_character_write_functions.sql）を
 // そのまま適用する。これにより楽観ロック・論理削除を担う DB 関数まで含めて本番同等で検証する。
 package postgres_test
@@ -57,9 +57,9 @@ func setupPool(t *testing.T) *pgxpool.Pool {
 
 	root := repoRoot(t)
 	for _, rel := range []string{
-		"third_party/character-db/schema.sql",
-		"third_party/character-db/views/00_set_updated_at.sql",
-		"third_party/character-db/views/10_character_write_functions.sql",
+		"schema.sql",
+		"views/00_set_updated_at.sql",
+		"views/10_character_write_functions.sql",
 	} {
 		sqlBytes, err := os.ReadFile(filepath.Join(root, rel))
 		require.NoError(t, err, "vendoring した SQL を読めること: %s", rel)

@@ -1,14 +1,12 @@
-# sqlc 設定。スキーマの正は別リポジトリ character-db。必要なファイルだけを
-# third_party/character-db/ に vendoring（通常ファイルとしてコミット）している。
-# この API はマイグレーションを持たず、schema-sync が vendored ファイルを上書きして追従する。
-#   生成: make sqlc  （docker の sqlc/sqlc を使うので Go へのツール導入は不要）
+# sqlc 設定。スキーマはこのリポジトリが所有する（schema.sql / views/ / migrations/）。
+# 生成: make sqlc  （docker の sqlc/sqlc を使うので Go へのツール導入は不要）
 version: "2"
 sql:
   - engine: postgresql
     # テーブル/ENUM は schema.sql、書き込み不変条件の関数は views/10_*.sql から catalog を構築する。
     schema:
-      - third_party/character-db/schema.sql
-      - third_party/character-db/views/10_character_write_functions.sql
+      - schema.sql
+      - views/10_character_write_functions.sql
     queries: internal/infrastructure/persistence/postgres/sqlc/query.sql
     gen:
       go:
