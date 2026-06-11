@@ -1,7 +1,7 @@
 # character-api
 
-[![CI](https://github.com/Yu-be-shi/character-api-go/actions/workflows/ci.yml/badge.svg)](https://github.com/Yu-be-shi/character-api-go/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/Yu-be-shi/character-api-go/actions/workflows/codeql.yml/badge.svg)](https://github.com/Yu-be-shi/character-api-go/actions/workflows/codeql.yml)
+[![CI](https://github.com/Yu-be-shi/ys-character-api/actions/workflows/ci.yml/badge.svg)](https://github.com/Yu-be-shi/ys-character-api/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Yu-be-shi/ys-character-api/actions/workflows/codeql.yml/badge.svg)](https://github.com/Yu-be-shi/ys-character-api/actions/workflows/codeql.yml)
 
 キャラクターデータの CRUD を行うコアAPI。
 ユーザー情報に一切依存しない、ピュアなキャラクターデータ管理サービス。
@@ -77,22 +77,23 @@ go test ./internal/usecase/...   # ユースケースのみ
 ## 起動方法
 
 ```bash
-# ローカル開発（推奨）: API 専用インフラの docker-compose から起動する。
-# 事前に character-db-infra を起動して character-db-net / DB を用意しておくこと。
-cd ../character-api-go-infra && docker compose up --build -d
+# ローカル開発（推奨）: 基盤スタック ys-infrastructure の docker-compose が
+# character-db-net / DB / migrate / この API をまとめて起動する。
+cd ../../ys-infrastructure && docker compose up --build -d
 
 # Air によるホットリロード単体開発
 make dev
 ```
 
-## マイグレーション
+## スキーマ / マイグレーション
 
-この API はマイグレーションを **持たない**。スキーマ（テーブル・ビュー・ENUM）は
-`character-db` リポジトリの宣言的定義（`schema.sql`）と Atlas マイグレーションが
-唯一の正であり、適用は `character-db-migrate` サービスが行う。
+このリポジトリがキャラクタースキーマの **唯一の正**（`schema.sql` / `migrations/`(Atlas) /
+`views/` / `seeds/`）を所有する。適用は `Dockerfile.migrate` から作る `character-db-migrate`
+サービスが行う（atlas apply → views → seeds）。アプリ起動時には migrate しない。
 
-スキーマを変更したいときは `character-db/` 側で `make migration` / `make hash` を実行する。
-カラムの削除・リネームは、この API を含む全 API が対応済みになってから行うこと。
+スキーマ変更は `make migration name=<説明>` / `make hash` /（必要なら）`make sqlc` を実行する。
+カラムの削除・リネームは読み手（消費者）の対応を確認してから行うこと。sqlc はローカルの
+`schema.sql` / `views/10_*.sql` から型生成する。
 
 ## サービス間認証
 
