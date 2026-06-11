@@ -154,6 +154,12 @@ func (h *CharacterHandler) Create(c echo.Context) error {
 	if err != nil {
 		return mapCharErr(err)
 	}
+	if out.Replayed {
+		// DB creation_token が既存行を返した（Redis ミス後の DB リプレイ）。
+		// 冪等ミドルウェアに「この結果を Redis に保存しない」よう通知し、
+		// Redis の bodyHash が現リクエストの値で上書きされるのを防ぐ。
+		c.Response().Header().Set("Idempotent-Replayed", "true")
+	}
 	setETag(c, out.Version)
 	return c.JSON(http.StatusCreated, dto.FromDomain(out))
 }

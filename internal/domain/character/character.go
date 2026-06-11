@@ -69,6 +69,10 @@ type Character struct {
 	// CreationToken は作成の冪等トークン（消費者の Idempotency-Key 由来。任意）。
 	// 同一トークンの再作成は DB 側の一意制約が弾き、既存行が返る（Redis 非依存の二重作成防止）。
 	CreationToken *string
+	// Replayed は DB の creation_token 一意制約が発動し、新規作成ではなく既存行を返したことを示す。
+	// handler 層が Idempotent-Replayed ヘッダをセットして Redis に誤った body hash が
+	// 記録されるのを防ぐために使う（DB リプレイは永続的に保証されるため Redis キャッシュ不要）。
+	Replayed bool
 }
 
 func New(name, description string, raceID uuid.UUID, gender Gender, now time.Time) (*Character, error) {
