@@ -65,7 +65,7 @@ go test ./internal/usecase/...   # ユースケースのみ
   パラメータ検証（400）・エラーマッピング（404/422）・正常系（201）をエンドツーエンドに検証
   （`internal/interfaces/http/router_test.go`）。
 - インメモリ fake を使うため、通常のテスト実行に PostgreSQL は不要。
-- **永続化層の統合テスト**（`-tags=integration`）：実 PostgreSQL に対し、vendoring した実スキーマ＋
+- **永続化層の統合テスト**（`-tags=integration`）：実 PostgreSQL に対し、このリポジトリの実スキーマ＋
   DB 関数を適用して version 競合（CH412）・論理削除（CH404）・FK→ErrInUse・NUMERIC 往復・
   updated_at トリガーを検証する。`TEST_DB_DSN`（無ければ `DB_DSN`）が前提。
   例: `go test -tags=integration ./internal/infrastructure/persistence/postgres/...`
