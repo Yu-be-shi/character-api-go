@@ -120,6 +120,14 @@ jobs:
           output: trivy-image.sarif
           severity: HIGH,CRITICAL
           exit-code: "0"
+      # Dependabot/fork PR は GITHUB_TOKEN が read-only に強制され security-events: write が
+      # 無効化される（job の permissions は無視される）。そこで push か「同一リポジトリ発の
+      # 非 Dependabot PR」のときだけ upload する。これで自分のブランチの PR では従来どおり
+      # コードスキャン結果が更新され、Dependabot/fork PR では 403 で落ちない。
       - uses: github/codeql-action/upload-sarif@v3
+        if: >-
+          github.event_name == 'push' ||
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+           github.actor != 'dependabot[bot]')
         with:
           sarif_file: trivy-image.sarif
