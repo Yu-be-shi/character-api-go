@@ -30,7 +30,7 @@ jobs:
 
     steps:
       # スキーマ（schema.sql / migrations / views / seeds）は自リポジトリが所有する。
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v5
         with:
@@ -73,7 +73,7 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # gitleaks は全履歴を走査する
 
@@ -109,7 +109,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: docker build --target runtime -t character-api:ci .
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@0.35.0
@@ -157,7 +157,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Validate atlas.sum integrity
         run: |
