@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -37,6 +38,14 @@ func (r *fakeCharRepo) Save(_ context.Context, c *chardomain.Character) error {
 	r.store[c.ID] = c
 	return nil
 }
+func (r *fakeCharRepo) Confirm(_ context.Context, id uuid.UUID) (*chardomain.Character, error) {
+	c, ok := r.store[id]
+	if !ok {
+		return nil, chardomain.ErrNotFound
+	}
+	return c, nil
+}
+func (r *fakeCharRepo) GC(_ context.Context, _ time.Duration) (int, error) { return 0, nil }
 func (r *fakeCharRepo) Update(_ context.Context, c *chardomain.Character, expectedVersion *int64) (*chardomain.Character, error) {
 	cur, ok := r.store[c.ID]
 	if !ok {

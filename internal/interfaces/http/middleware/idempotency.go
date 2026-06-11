@@ -37,7 +37,8 @@ var replayHeaders = []string{echo.HeaderContentType, "ETag", "Location"}
 //   - 同一キー・同一ボディの再送は保存済みレスポンスを再生（Idempotent-Replayed: true）。
 //   - 同一キー・異なるボディは 422（キーの誤用を黙って再生しない）。
 //   - 処理中の同一キーは 409。
-//   - ストア障害時は可用性優先で通常処理（fail-open）。
+//   - ストア障害時は正しさ優先で 503 を返す（fail-closed）。二重作成を防ぐため素通ししない。
+//     （作成は加えて DB の creation_token 一意制約でも保護され、ストア不在でも二重作成しない。）
 //   - 成功時のみ結果を保存し、ハンドラのエラー・panic・直接書き込まれた 5xx の場合は
 //     defer で予約を解放して同一キーで再試行できるようにする（panic は外側の Recover
 //     まで巻き戻る途中でこの defer が実行される）。
@@ -64,7 +65,9 @@ func Idempotency(store idempotency.Store) echo.MiddlewareFunc {
 
 			prev, isNew, err := store.Begin(ctx, storeKey)
 			if err != nil {
-				return next(c) // fail-open
+				// fail-closed: ストア障害時は二重作成を防ぐため拒否する（正しさ優先）。
+				slog.Warn("idempotency store unavailable; rejecting (fail-closed)", "key", storeKey, "error", err)
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "idempotency store temporarily unavailable")
 			}
 			if !isNew {
 				if prev == nil {

@@ -41,6 +41,14 @@ func pgTextOrNull(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}
 }
 
+// pgTextPtr は *string を NULL 可能テキストへ（nil → NULL）。creation_token（作成の冪等トークン）用。
+func pgTextPtr(p *string) pgtype.Text {
+	if p == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *p, Valid: true}
+}
+
 func textString(t pgtype.Text) string {
 	if t.Valid {
 		return t.String

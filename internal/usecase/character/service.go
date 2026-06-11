@@ -40,8 +40,15 @@ type CreateInput struct {
 	SizeTop     *int16
 	SizeMiddle  *int16
 	SizeBottom  *int16
+	// CreationToken は作成の冪等トークン（消費者の Idempotency-Key。任意）。
+	// ※ ReplaceInput(=CreateInput) を ReplaceFields へ変換する箇所があるため、
+	//   PUT には無いこのフィールドは toReplaceFields で明示的に落とす。
+	CreationToken *string
 }
 
+// Create は予約（pending）としてキャラクターを作成する。可視化するには所有者を紐づけた後に
+// Confirm を呼ぶ（予約パターン）。CreationToken が指定され同一トークンの行が既にあれば、
+// 二重作成せず既存の状態を返す（永続的な冪等作成）。
 func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Character, error) {
 	c, err := domain.New(in.Name, in.Description, in.RaceID, in.Gender, s.now())
 	if err != nil {
@@ -55,12 +62,32 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Character
 	c.SizeTop = in.SizeTop
 	c.SizeMiddle = in.SizeMiddle
 	c.SizeBottom = in.SizeBottom
+	c.CreationToken = in.CreationToken
 
 	// 事前 SELECT せず保存。race が無ければ FK 違反 → domain.ErrRaceNotFound が返る。
 	if err := s.repo.Save(ctx, c); err != nil {
 		return nil, fmt.Errorf("usecase create character: %w", err)
 	}
 	return c, nil
+}
+
+// Confirm は予約（pending）を確定（active）し可視化する。冪等。
+func (s *Service) Confirm(ctx context.Context, id uuid.UUID) (*domain.Character, error) {
+	c, err := s.repo.Confirm(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("usecase confirm character: %w", err)
+	}
+	return c, nil
+}
+
+// SweepUnconfirmed は確定されなかった予約（pending）のうち maxAge より古いものを回収する。
+// 戻り値は削除件数。API のバックグラウンドスイーパーが定期的に呼ぶ。
+func (s *Service) SweepUnconfirmed(ctx context.Context, maxAge time.Duration) (int, error) {
+	n, err := s.repo.GC(ctx, maxAge)
+	if err != nil {
+		return 0, fmt.Errorf("usecase sweep unconfirmed characters: %w", err)
+	}
+	return n, nil
 }
 
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (*domain.Character, error) {
@@ -86,9 +113,29 @@ func (s *Service) List(ctx context.Context, p domain.ListParams) ([]*domain.Char
 	return items, total, nil
 }
 
-// ReplaceInput は PUT（全置換）の入力。フィールド構成は CreateInput と同一
+// ReplaceInput は PUT（全置換）の入力。本体フィールドは CreateInput と同一
 // （PUT は「作成時と同じ表現で丸ごと置き換える」セマンティクスのため）。
+// CreationToken は作成専用なので PUT では無視される（toReplaceFields で落とす）。
 type ReplaceInput = CreateInput
+
+// toReplaceFields は ReplaceInput(=CreateInput) を全置換用の ReplaceFields へ写像する。
+// 作成専用の CreationToken は持ち込まない（PUT に冪等トークンの概念は無い）。
+func toReplaceFields(in ReplaceInput) domain.ReplaceFields {
+	return domain.ReplaceFields{
+		Name:        in.Name,
+		Description: in.Description,
+		RaceID:      in.RaceID,
+		Gender:      in.Gender,
+		BirthDate:   in.BirthDate,
+		BirthPlace:  in.BirthPlace,
+		HeightCm:    in.HeightCm,
+		WeightKg:    in.WeightKg,
+		BodyFat:     in.BodyFat,
+		SizeTop:     in.SizeTop,
+		SizeMiddle:  in.SizeMiddle,
+		SizeBottom:  in.SizeBottom,
+	}
+}
 
 // Replace は PUT（全置換）。送られなかった任意項目はクリアされる。
 // expectedVersion が非 nil なら楽観ロック（版不一致は ErrVersionConflict）。
@@ -104,7 +151,7 @@ func (s *Service) Replace(ctx context.Context, id uuid.UUID, in ReplaceInput, ex
 		v := c.Version
 		expectedVersion = &v
 	}
-	if err := c.Replace(domain.ReplaceFields(in)); err != nil {
+	if err := c.Replace(toReplaceFields(in)); err != nil {
 		return nil, err
 	}
 	updated, err := s.repo.Update(ctx, c, expectedVersion)

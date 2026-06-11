@@ -66,6 +66,9 @@ type Character struct {
 	Version     int64 // 楽観ロック用。更新のたびに DB 側で +1 される
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	// CreationToken は作成の冪等トークン（消費者の Idempotency-Key 由来。任意）。
+	// 同一トークンの再作成は DB 側の一意制約が弾き、既存行が返る（Redis 非依存の二重作成防止）。
+	CreationToken *string
 }
 
 func New(name, description string, raceID uuid.UUID, gender Gender, now time.Time) (*Character, error) {

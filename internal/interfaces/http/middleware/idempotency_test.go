@@ -177,7 +177,7 @@ func TestIdempotency_ReleasesOnPanic(t *testing.T) {
 	assert.Equal(t, int32(2), calls)
 }
 
-// brokenStore は常にエラーを返す Store（fail-open の検証用）。
+// brokenStore は常にエラーを返す Store（fail-closed の検証用）。
 type brokenStore struct{}
 
 func (brokenStore) Begin(_ context.Context, _ string) (*idempotency.Result, bool, error) {
@@ -212,7 +212,7 @@ func TestIdempotency_InProgressSameKey_Returns409(t *testing.T) {
 	assert.Equal(t, int32(0), calls, "ハンドラは実行されない")
 }
 
-func TestIdempotency_StoreFailure_FailsOpen(t *testing.T) {
+func TestIdempotency_StoreFailure_FailsClosed(t *testing.T) {
 	var calls int32
 	e := echo.New()
 	e.Use(mw.Idempotency(brokenStore{}))
@@ -224,9 +224,10 @@ func TestIdempotency_StoreFailure_FailsOpen(t *testing.T) {
 	r1 := postBody(e, "/things", "k1", "{}")
 	r2 := postBody(e, "/things", "k1", "{}")
 
-	require.Equal(t, http.StatusCreated, r1.Code)
-	require.Equal(t, http.StatusCreated, r2.Code)
-	assert.Equal(t, int32(2), calls, "ストア障害時は可用性優先で毎回実行（fail-open）")
+	// 正しさ優先（fail-closed）: ストア障害時は 503 を返し、ハンドラを実行しない（二重作成防止）。
+	require.Equal(t, http.StatusServiceUnavailable, r1.Code)
+	require.Equal(t, http.StatusServiceUnavailable, r2.Code)
+	assert.Equal(t, int32(0), calls, "ストア障害時は実行しない（fail-closed）")
 }
 
 func TestIdempotency_KeyTooLong_Returns400(t *testing.T) {

@@ -29,9 +29,8 @@ jobs:
           --health-retries 5
 
     steps:
+      # third_party/character-db のスキーマは vendoring 済み（通常ファイル）なので submodules 不要。
       - uses: actions/checkout@v4
-        with:
-          submodules: true # third_party/character-db（sqlc 生成・統合テストのスキーマ源）
 
       - uses: actions/setup-go@v5
         with:
@@ -51,7 +50,7 @@ jobs:
           INTERNAL_API_KEY: test-key-for-ci
 
       # リポジトリ層の実 DB 統合テスト（version 競合 CH412・論理削除 CH404・FK→ErrInUse・updated_at トリガー）。
-      # submodule の実スキーマ＋ DB 関数を適用して本番同等で検証する。
+      # vendoring した実スキーマ＋ DB 関数を適用して本番同等で検証する。
       - name: integration test (repository, real DB)
         run: go test -race -tags=integration ./internal/infrastructure/persistence/postgres/...
         env:

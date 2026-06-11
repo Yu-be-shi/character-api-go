@@ -40,6 +40,17 @@ func (r *fakeCharRepo) Save(_ context.Context, c *domain.Character) error {
 	return nil
 }
 
+func (r *fakeCharRepo) Confirm(_ context.Context, id uuid.UUID) (*domain.Character, error) {
+	c, ok := r.store[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	cp := *c
+	return &cp, nil
+}
+
+func (r *fakeCharRepo) GC(_ context.Context, _ time.Duration) (int, error) { return 0, nil }
+
 func (r *fakeCharRepo) Update(_ context.Context, c *domain.Character, expectedVersion *int64) (*domain.Character, error) {
 	if r.updateErr != nil {
 		return nil, r.updateErr

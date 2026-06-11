@@ -28,6 +28,7 @@ func NewCharacterHandler(svc *usecase.Service) *CharacterHandler {
 func (h *CharacterHandler) Register(g *echo.Group) {
 	g.GET("", h.List)
 	g.POST("", h.Create)
+	g.POST("/:id/confirm", h.Confirm) // 予約パターン: 作成(pending)を確定(active)し可視化する
 	g.GET("/:id", h.Get)
 	g.PUT("/:id", h.Replace) // 全置換（省略した任意項目は NULL になる）
 	g.PATCH("/:id", h.Patch) // 部分更新（送った項目だけ変更）
@@ -129,25 +130,57 @@ func (h *CharacterHandler) Create(c echo.Context) error {
 	if err := c.Validate(&req); err != nil {
 		return err
 	}
+	// 作成の冪等トークン。Idempotency-Key ヘッダを永続的な二重作成防止に再利用する
+	// （Redis の冪等性ミドルウェアとは独立に、DB の一意制約で同一作成を弾く）。
+	var token *string
+	if k := strings.TrimSpace(c.Request().Header.Get("Idempotency-Key")); k != "" {
+		token = &k
+	}
 	out, err := h.svc.Create(c.Request().Context(), usecase.CreateInput{
-		Name:        req.Name,
-		Description: req.Description,
-		RaceID:      req.RaceID,
-		Gender:      chardomain.Gender(req.Gender),
-		BirthDate:   req.BirthDate,
-		BirthPlace:  req.BirthPlace,
-		HeightCm:    req.HeightCm,
-		WeightKg:    req.WeightKg,
-		BodyFat:     req.BodyFat,
-		SizeTop:     req.SizeTop,
-		SizeMiddle:  req.SizeMiddle,
-		SizeBottom:  req.SizeBottom,
+		Name:          req.Name,
+		Description:   req.Description,
+		RaceID:        req.RaceID,
+		Gender:        chardomain.Gender(req.Gender),
+		BirthDate:     req.BirthDate,
+		BirthPlace:    req.BirthPlace,
+		HeightCm:      req.HeightCm,
+		WeightKg:      req.WeightKg,
+		BodyFat:       req.BodyFat,
+		SizeTop:       req.SizeTop,
+		SizeMiddle:    req.SizeMiddle,
+		SizeBottom:    req.SizeBottom,
+		CreationToken: token,
 	})
 	if err != nil {
 		return mapCharErr(err)
 	}
 	setETag(c, out.Version)
 	return c.JSON(http.StatusCreated, dto.FromDomain(out))
+}
+
+// Confirm godoc
+// @Summary      キャラクター予約の確定
+// @Description  予約パターン: 作成直後の pending を確定（active）し、一覧/取得に出るようにする。冪等。
+// @Tags         characters
+// @Produce      json
+// @Security     InternalAPIKey
+// @Param        id   path      string  true  "キャラクターID (UUID)"
+// @Success      200  {object}  dto.CharacterResponse
+// @Failure      400  {object}  dto.ErrorResponse
+// @Failure      404  {object}  dto.ErrorResponse
+// @Failure      500  {object}  dto.ErrorResponse
+// @Router       /api/v1/characters/{id}/confirm [post]
+func (h *CharacterHandler) Confirm(c echo.Context) error {
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
+	out, err := h.svc.Confirm(c.Request().Context(), id)
+	if err != nil {
+		return mapCharErr(err)
+	}
+	setETag(c, out.Version)
+	return c.JSON(http.StatusOK, dto.FromDomain(out))
 }
 
 // Get godoc

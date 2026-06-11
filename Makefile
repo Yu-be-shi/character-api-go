@@ -26,7 +26,7 @@ generate:
 		sh -c "go install github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION) && swag init -g cmd/api/main.go -o docs --parseInternal"
 
 # ── sqlc コード生成 ───────────────────────────────────────────────────────────────
-# スキーマは third_party/character-db（submodule）から読む。バージョン固定で CI のドリフト検知と一致させる。
+# スキーマは third_party/character-db（vendoring した通常ファイル）から読む。CI のドリフト検知と一致させる。
 SQLC_VERSION := 1.31.1
 sqlc:
 	docker run --rm -v "$(shell pwd):/src" -w /src sqlc/sqlc:$(SQLC_VERSION) generate
