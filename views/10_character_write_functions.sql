@@ -131,7 +131,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- 予約の確定（reservation パターン）。作成直後の pending 行に所有者が紐づいた後、
--- 消費者がこれを呼んで confirmed_at を立て、可視データ（v1_characters / API の読み取り）に昇格させる。
+-- 消費者がこれを呼んで confirmed_at を立て、可視データ（API の読み取り＝確定済み・生存行）に昇格させる。
 -- 冪等: 再送（既に確定済み）でも updated_at を動かさず現状の行を返す。
 -- 不在 / 論理削除済み / TTL 回収済みは CH404（消費者は確定不能を検知して自分のリンクを掃除する）。
 DROP FUNCTION IF EXISTS confirm_character(UUID);

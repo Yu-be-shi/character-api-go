@@ -41,7 +41,7 @@ CREATE TABLE core_characters (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- 予約パターン: 作成直後は NULL（pending=予約中）。消費者が所有を確定すると
-    -- confirm_character が NOW() を立てる。可視データ（v1_characters / API の読み取り・更新・削除）は
+    -- confirm_character が NOW() を立てる。可視データ（API の読み取り・更新・削除＝確定済み・生存行）は
     -- 確定済みのみを対象とし、確定されない予約は gc_unconfirmed_characters が物理回収する
     -- （消費者は origin を削除せず、未確定の回収は origin 自身の管轄で行う）。
     confirmed_at TIMESTAMPTZ,
@@ -51,7 +51,7 @@ CREATE TABLE core_characters (
 
 CREATE INDEX idx_core_characters_race_id ON core_characters(race_id);
 
--- 一覧取得（v1_characters / API の List）は常に「確定済み かつ 生存行を created_at, id 順」で読む。
+-- 一覧取得（API の List）は常に「確定済み かつ 生存行を created_at, id 順」で読む。
 -- 未確定・削除済み行をスキャンしない部分インデックスでこのアクセスパスを直接支える。
 -- ※ gender 単独のインデックスは ENUM 4 値の低カーディナリティで実用上使われないため持たない。
 CREATE INDEX idx_core_characters_active_created_at
