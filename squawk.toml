@@ -1,0 +1,24 @@
+# squawk: マイグレーションSQLの安全リンタ設定  https://squawkhq.com
+#
+# 下記ルールはこのプロジェクトの方針上ノイズになるため除外する（理由を明記）。
+# これら以外（既存テーブルへの破壊的変更・列の型変更・NOT NULL 追加・リネーム等）は
+# 引き続き検出され、危険なマイグレーションを CI で止められる。
+excluded_rules = [
+    # インデックスはテーブルと同じ初期マイグレーションで作成する（greenfield）。
+    # その場合 CONCURRENTLY は不要、かつトランザクション内では使えない。
+    # 既存の大きなテーブルへ後からインデックスを足すときは手動で CONCURRENTLY を使うこと。
+    "require-concurrent-index-creation",
+    # 同上（削除側）。テーブルが小さくロック保持は一瞬で、本番 DB も ephemeral（毎日再構築）。
+    # 稼働中の大きなテーブルからインデックスを外すときは手動で DROP INDEX CONCURRENTLY を使うこと。
+    "require-concurrent-index-deletion",
+    # Atlas はバージョン管理付きで各マイグレーションを一度だけ適用する（途中再実行が無い）ため、
+    # IF NOT EXISTS による冪等化は冗長。
+    "prefer-robust-stmts",
+    # 身体測定値（身長/体重/サイズ等）は smallint で十分という意図的な設計。bigint は不要。
+    "prefer-bigint-over-smallint",
+    # 長さ上限付き varchar(n) は API 側バリデーションと揃えた意図的な選択（text + CHECK にしない）。
+    "ban-char-field",
+    # statement_timeout / lock_timeout の設定は初期（greenfield）マイグレーションでは不要。
+    # 稼働中テーブルに対する変更を入れる際は、その都度マイグレーション冒頭で設定を検討する。
+    "require-timeout-settings",
+]

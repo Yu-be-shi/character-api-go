@@ -12,7 +12,8 @@ import (
 )
 
 // Open は設定済みの pgx コネクションプールを返す。
-// マイグレーションはこの API では行わない（スキーマの正は別リポジトリ character-db）。
+// マイグレーションはアプリ起動時には行わない（適用は character-db-migrate が担う）。
+// スキーマの正はこのリポジトリ（schema.sql / migrations / views / seeds）。
 func Open(ctx context.Context, cfg config.DBConfig) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(cfg.DSN)
 	if err != nil {
