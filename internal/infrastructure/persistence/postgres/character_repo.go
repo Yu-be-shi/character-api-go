@@ -65,6 +65,12 @@ func (r *CharacterRepository) Save(ctx context.Context, c *domain.Character) err
 		}
 		row, err := r.q.GetCharacterByToken(ctx, pgText(*c.CreationToken))
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// GetCharacterByToken は deleted_at IS NULL のみ対象。
+				// ErrNoRows は論理削除済み行が creation_token を保持している衝突（再生不可）。
+				// クライアントは新しい Idempotency-Key で再試行する必要がある。
+				return domain.ErrCreationTokenConsumed
+			}
 			return fmt.Errorf("postgres: save character: fetch existing by token: %w", err)
 		}
 		*c = *characterFromRow(sqlc.GetCharacterRow(row))
@@ -90,11 +96,16 @@ func (r *CharacterRepository) Confirm(ctx context.Context, id uuid.UUID) (*domai
 // GC は確定されなかった予約（pending）を maxAge より古いものに限り物理回収する。
 // 戻り値は削除件数。origin 自身の後始末で、可視データ（確定済み）には触れない。
 func (r *CharacterRepository) GC(ctx context.Context, maxAge time.Duration) (int, error) {
-	secs := int32(maxAge.Seconds())
-	if secs < 0 {
-		secs = 0
+	// 最小 1 秒: INTERVAL '0' は pending を即時回収する事故を防ぐ。
+	// 最大 math.MaxInt32 秒（≒68年）: int32 変換の桁あふれを防ぐ。
+	const maxSecs = 1<<31 - 1 // math.MaxInt32
+	secs := maxAge.Seconds()
+	if secs < 1 {
+		secs = 1
+	} else if secs > maxSecs {
+		secs = maxSecs
 	}
-	n, err := r.q.GCUnconfirmedCharacters(ctx, secs)
+	n, err := r.q.GCUnconfirmedCharacters(ctx, int32(secs))
 	if err != nil {
 		return 0, fmt.Errorf("postgres: gc unconfirmed characters: %w", err)
 	}

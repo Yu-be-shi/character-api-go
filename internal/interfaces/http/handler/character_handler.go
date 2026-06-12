@@ -409,6 +409,10 @@ func mapCharErr(err error) error {
 	case errors.Is(err, chardomain.ErrVersionConflict):
 		// 楽観ロック：別の更新が先に入った。クライアントは再取得して再試行する。
 		return echo.NewHTTPError(http.StatusPreconditionFailed, "version conflict: resource was modified")
+	case errors.Is(err, chardomain.ErrCreationTokenConsumed):
+		// 論理削除済み行が creation_token を保持し、再生行を引けない衝突。
+		// クライアントは新しい Idempotency-Key で再試行する必要がある。
+		return echo.NewHTTPError(http.StatusConflict, "creation token already consumed: retry with a new Idempotency-Key")
 	default:
 		// 未分類のエラー（DB 障害など）。詳細はサーバーログにのみ残し、
 		// クライアントには内部情報を漏らさない汎用 500 を返す。

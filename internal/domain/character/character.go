@@ -19,6 +19,10 @@ var (
 	ErrRaceNotFound = errors.New("referenced race not found")
 	// ErrVersionConflict は楽観ロックの版不一致（別の更新が先に入った）ときに返す。
 	ErrVersionConflict = errors.New("version conflict")
+	// ErrCreationTokenConsumed は creation_token が既に使用済み（論理削除済み行が保持）のときに返す。
+	// INSERT が ON CONFLICT DO NOTHING（0 行）になり、かつ削除済みのため再生行を引けない場合。
+	// クライアントは新しい Idempotency-Key で再試行する必要がある。
+	ErrCreationTokenConsumed = errors.New("creation token already consumed")
 )
 
 const (

@@ -349,3 +349,35 @@ func TestIntegration_List_FilterPagingOrder(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, total)
 }
+
+// creation_token 消費済み（論理削除済み行とトークン衝突）: ErrCreationTokenConsumed を返す。
+// GetCharacterByToken は deleted_at IS NULL でフィルタするため、削除済み行が同一トークンを
+// 保持するとき再生行を引けない → 従来は 500 だった経路が 409 になる。
+func TestIntegration_Save_CreationTokenConsumed(t *testing.T) {
+	pool := setupPool(t)
+	repo := pgrepo.NewCharacterRepository(pool)
+	raceID := seedRaceRow(t, pool)
+
+	tok := "consumed-" + uuid.Must(uuid.NewV7()).String()
+
+	// 1. pending 作成
+	c1 := newChar(t, raceID)
+	c1.CreationToken = &tok
+	require.NoError(t, repo.Save(context.Background(), c1))
+
+	// 2. confirm → active（確定済み行が creation_token を保持）
+	_, err := repo.Confirm(context.Background(), c1.ID)
+	require.NoError(t, err)
+
+	// 3. soft_delete（creation_token は行に残ったまま論理削除）
+	err = repo.Delete(context.Background(), c1.ID)
+	require.NoError(t, err)
+
+	// 4. 同一 token で再作成 → ON CONFLICT DO NOTHING（0行）かつ GetCharacterByToken が ErrNoRows
+	//    → ErrCreationTokenConsumed（409）を返すべき
+	c2 := newChar(t, raceID)
+	c2.CreationToken = &tok
+	err = repo.Save(context.Background(), c2)
+	assert.ErrorIs(t, err, chardomain.ErrCreationTokenConsumed,
+		"削除済みトークンとの衝突は ErrCreationTokenConsumed を返すべき")
+}
