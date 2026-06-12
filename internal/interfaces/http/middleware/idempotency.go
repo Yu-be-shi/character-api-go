@@ -107,6 +107,13 @@ func Idempotency(store idempotency.Store) echo.MiddlewareFunc {
 			if rec.status >= http.StatusInternalServerError {
 				return nil
 			}
+			// DB creation_token リプレイ（Redis ミス後に DB 一意制約が発動した場合）は保存しない。
+			// 保存すると現リクエストの bodyHash で上書きされ、元ボディと異なるリクエストが
+			// 先に DB リプレイを踏んだ場合に元ボディの再送で 422 になる競合を引き起こす。
+			// DB リプレイは永続的（creation_token 一意制約）なので Redis キャッシュは不要。
+			if c.Response().Header().Get("Idempotent-Replayed") == "true" {
+				return nil // defer が予約を解放: 次のリクエストも同様に DB リプレイを経由
+			}
 			res := idempotency.Result{
 				Status:   rec.status,
 				Body:     rec.buf.Bytes(),

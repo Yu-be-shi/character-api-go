@@ -240,6 +240,31 @@ func TestIdempotency_KeyTooLong_Returns400(t *testing.T) {
 	assert.Equal(t, int32(0), calls)
 }
 
+// DB creation_token リプレイ（Idempotent-Replayed ヘッダ付き）は Redis に保存されない。
+// Redis ミス後に DB 一意制約が既存行を返した場合、現リクエストの bodyHash で
+// Redis を上書きすると元ボディの再送で 422 になる競合が起きるため保存しない。
+func TestIdempotency_DBReplay_NotCached(t *testing.T) {
+	var calls int32
+	e := echo.New()
+	e.Use(mw.Idempotency(idempotency.NewMemoryStore()))
+	e.POST("/things", func(c echo.Context) error {
+		atomic.AddInt32(&calls, 1)
+		// DB リプレイを模倣: Idempotent-Replayed ヘッダをセットして 201 を返す。
+		c.Response().Header().Set("Idempotent-Replayed", "true")
+		return c.JSON(http.StatusCreated, echo.Map{"ok": true})
+	})
+
+	r1 := postBody(e, "/things", "k1", `{"name":"original"}`)
+	require.Equal(t, http.StatusCreated, r1.Code)
+	assert.Equal(t, "true", r1.Header().Get("Idempotent-Replayed"))
+
+	// DB リプレイは Redis に保存されない（予約を解放する）ので、
+	// 別のボディで再送しても 422 にならず再度ハンドラが実行される。
+	r2 := postBody(e, "/things", "k1", `{"name":"different"}`)
+	assert.Equal(t, http.StatusCreated, r2.Code, "DB リプレイは Redis を汚染しないため別ボディでも 422 にならない")
+	assert.Equal(t, int32(2), calls, "Redis に保存されないため毎回ハンドラが実行される")
+}
+
 func TestIdempotency_Direct5xx_NotStored(t *testing.T) {
 	var calls int32
 	e := echo.New()

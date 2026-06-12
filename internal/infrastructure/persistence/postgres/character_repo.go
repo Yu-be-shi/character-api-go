@@ -68,6 +68,7 @@ func (r *CharacterRepository) Save(ctx context.Context, c *domain.Character) err
 			return fmt.Errorf("postgres: save character: fetch existing by token: %w", err)
 		}
 		*c = *characterFromRow(sqlc.GetCharacterRow(row))
+		c.Replayed = true // DB creation_token replay: Redis に誤った bodyHash を記録させない
 		return nil
 	}
 	return nil
