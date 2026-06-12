@@ -136,6 +136,41 @@ BEGIN
         RAISE EXCEPTION 'gender_enum: 不正値が弾かれていない';
     END IF;
 
+    -- 7.5 creation_token 消費済み（deleted_at ある行とのトークン衝突）検証。
+    --    作成→confirm→soft_delete→同一 creation_token で再 INSERT を試みると
+    --    ON CONFLICT DO NOTHING（0 行）かつ deleted_at IS NULL 行が無いため再生不可。
+    --    このシナリオを DB 層で再現し、INSERT が成功しない（0 行）ことを確認する。
+    DECLARE
+        v_token TEXT := 'behavior_test_consumed_token_' || gen_random_uuid()::text;
+        v_consumed_id UUID;
+        v_row_count INT;
+    BEGIN
+        -- 1. creation_token 付きで作成
+        INSERT INTO core_characters (name, race_id, gender, creation_token)
+            VALUES ('_token_consumed', v_race_id, 'other', v_token)
+            RETURNING id INTO v_consumed_id;
+        -- 2. confirm
+        PERFORM confirm_character(v_consumed_id);
+        -- 3. soft_delete（creation_token は行に残ったまま削除される）
+        PERFORM soft_delete_character(v_consumed_id);
+        -- 4. 同一 token で INSERT → ON CONFLICT DO NOTHING = 0 行
+        INSERT INTO core_characters (name, race_id, gender, creation_token)
+            VALUES ('_token_consumed_retry', v_race_id, 'other', v_token)
+            ON CONFLICT DO NOTHING;
+        GET DIAGNOSTICS v_row_count = ROW_COUNT;
+        IF v_row_count <> 0 THEN
+            RAISE EXCEPTION 'creation_token 消費済み: 削除済みトークンで新規 INSERT が成功した（0 行を期待）';
+        END IF;
+        -- GetCharacterByToken（deleted_at IS NULL フィルタ）が行を返さないことも確認
+        SELECT count(*) INTO v_count FROM core_characters
+            WHERE creation_token = v_token AND deleted_at IS NULL;
+        IF v_count <> 0 THEN
+            RAISE EXCEPTION 'creation_token 消費済み: GetCharacterByToken 相当で行が引けてしまう';
+        END IF;
+        -- 後片付け
+        DELETE FROM core_characters WHERE creation_token = v_token;
+    END;
+
     -- 7.5 gc_unconfirmed_characters: 古い未確定予約だけを物理回収し、確定済み行には触れない。
     INSERT INTO core_characters (name, race_id, gender, created_at)
         VALUES ('_behavior_pending_old', v_race_id, 'other', NOW() - INTERVAL '2 hours');
