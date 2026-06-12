@@ -380,6 +380,18 @@ func TestReplaceCharacter_WeakIfMatch_Rejected(t *testing.T) {
 	assert.Equal(t, http.StatusPreconditionFailed, res.StatusCode)
 }
 
+func TestReplaceCharacter_InvalidIfMatch_Rejected(t *testing.T) {
+	srv, raceID := newTestServer(t)
+	id := createCharacter(t, srv, raceID)
+	body := `{"name":"x","raceId":"` + raceID.String() + `","gender":"female"}`
+
+	// RFC 9110: opaque-tag に DQUOTE は含まれない。"""3""" は不正 → 400。
+	for _, bad := range []string{`"""3"""`, `"1"2"`, `1`, `"`} {
+		res := putWithIfMatch(t, srv, "/api/v1/characters/"+id, bad, body)
+		assert.Equal(t, http.StatusBadRequest, res.StatusCode, "If-Match=%q should be rejected", bad)
+	}
+}
+
 func TestReplaceCharacter_MatchingVersion_BumpsETag(t *testing.T) {
 	srv, raceID := newTestServer(t)
 	id := createCharacter(t, srv, raceID) // 版は 1

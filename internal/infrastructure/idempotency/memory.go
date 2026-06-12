@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// MemoryStore はインメモリの Store 実装（ローカル単一プロセス・テスト用。TTL は持たない）。
+// MemoryStore はインメモリの Store 実装（テスト専用・本番未配線。TTL は持たない）。
 // 複数インスタンスでは共有されないため本番では Redis 実装を使うこと。
 type MemoryStore struct {
 	mu   sync.Mutex

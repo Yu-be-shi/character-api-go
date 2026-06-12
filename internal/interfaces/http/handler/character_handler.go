@@ -375,7 +375,16 @@ func parseIfMatch(c echo.Context) (*int64, error) {
 		return nil, echo.NewHTTPError(http.StatusPreconditionFailed,
 			"weak entity-tag never matches If-Match (RFC 9110)")
 	}
-	v, err := strconv.ParseInt(strings.Trim(raw, `"`), 10, 64)
+	// RFC 9110 §8.8.3: opaque-tag = DQUOTE *etagc DQUOTE。etagc に DQUOTE は含まれない。
+	// strings.Trim は複数引用符（"""3"""）も剥がすため、1 文字ずつ確認する。
+	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid If-Match header")
+	}
+	inner := raw[1 : len(raw)-1]
+	if strings.ContainsRune(inner, '"') {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid If-Match header")
+	}
+	v, err := strconv.ParseInt(inner, 10, 64)
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid If-Match header")
 	}
