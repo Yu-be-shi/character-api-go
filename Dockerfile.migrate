@@ -3,7 +3,7 @@ FROM arigaio/atlas:1.2.2 AS atlas
 
 # 実行イメージ: psql を持つ postgres-alpine に atlas を載せる。
 # atlas でテーブルを適用し、psql でビュー/関数（views/*.sql）を冪等適用するため両方が要る。
-FROM postgres:16-alpine
+FROM postgres:18-alpine
 COPY --from=atlas /atlas /usr/local/bin/atlas
 COPY migrations /migrations
 COPY views /views
